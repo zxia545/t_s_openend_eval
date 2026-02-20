@@ -1,0 +1,34 @@
+[build-system]
+requires = [
+    "setuptools>=61.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "livebench"
+version = "0.0.4"
+description = "A living benchmark for large language models."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+]
+dependencies = [
+    "anthropic>=0.3", "datasets", "httpx", "immutabledict", "langdetect", 
+    "levenshtein>=0.20.4", "nltk", "numpy", "openai", "google-genai", "together",
+    "pandas", "requests", "rich>=10.0.0",
+    "shortuuid", "sympy>=1.13", "tqdm>=4.62.1", "wheel", "tenacity", "lark", "libtmux", "pyyaml", "dataclasses_json",
+    "docker", "gitpython", "toml", "PyGithub", "unidiff", "ruamel.yaml", "simple-parsing", "rich-argparse", "pydantic_settings", "litellm", "tabulate", "textual>=1.0.0", "jinja2",
+    "typer", "platformdirs", "prompt_toolkit", "emoji", "syllapy", "unicodedata2", "spacy"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/livebench/LiveBench"
+"Bug Tracker" = "https://github.com/livebench/LiveBench/issues"
+
+[tool.setuptools.packages.find]
+exclude = ["notebooks"]
+
+[tool.wheel]
+exclude = ["notebooks"]

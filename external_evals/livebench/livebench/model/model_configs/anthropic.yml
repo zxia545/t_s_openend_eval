@@ -1,0 +1,358 @@
+# Anthropic Models
+---
+display_name: claude-3-opus-20240229
+api_name:
+  anthropic: claude-3-opus-20240229
+aliases:
+  - claude-3-opus
+---
+display_name: claude-3-sonnet-20240229
+api_name:
+  anthropic: claude-3-sonnet-20240229
+---
+display_name: claude-3-haiku-20240307
+api_name:
+  anthropic: claude-3-haiku-20240307
+---
+display_name: claude-3-5-sonnet-20240620
+api_name:
+  anthropic: claude-3-5-sonnet-20240620
+---
+display_name: claude-3-5-sonnet-20241022
+api_name:
+  anthropic: claude-3-5-sonnet-20241022
+aliases:
+  - claude-3-5-sonnet
+---
+display_name: claude-3-5-haiku-20241022
+api_name:
+  anthropic: claude-3-5-haiku-20241022
+aliases:
+  - claude-3-5-haiku
+---
+display_name: claude-3-7-sonnet-20250219-thinking-25k
+api_name:
+  anthropic: claude-3-7-sonnet-20250219
+aliases:
+  - claude-3-7-sonnet-thinking-25k
+api_kwargs:
+  default:
+    thinking:
+      type: enabled
+      budget_tokens: 25000
+    max_tokens: 32000
+    temperature: 1
+    extra_headers:
+      anthropic-beta: output-128k-2025-02-19
+---
+display_name: claude-3-7-sonnet-20250219-thinking-64k
+api_name:
+  anthropic: claude-3-7-sonnet-20250219
+aliases:
+  - claude-3-7-sonnet-thinking-64k
+  - claude-3-7-sonnet-thinking
+api_kwargs:
+  default:
+    thinking:
+      type: enabled
+      budget_tokens: 63000
+    max_tokens: 64000
+    temperature: 1
+    extra_headers:
+      anthropic-beta: output-128k-2025-02-19
+---
+display_name: claude-3-7-sonnet-20250219-base
+api_name:
+  anthropic: claude-3-7-sonnet-20250219
+aliases:
+  - claude-3-7-sonnet-base
+  - claude-3-7-sonnet
+api_kwargs:
+  default:
+    extra_headers:
+      anthropic-beta: output-128k-2025-02-19
+---
+display_name: claude-4-sonnet-20250514-base
+api_name:
+  anthropic: claude-sonnet-4-20250514
+api_kwargs:
+  default:
+    temperature: 1
+aliases:
+  - claude-4-sonnet-base
+  - claude-4-sonnet
+---
+display_name: claude-4-sonnet-20250514-thinking-64k
+api_name:
+  anthropic: claude-sonnet-4-20250514
+api_kwargs:
+  default:
+    temperature: 1
+    thinking:
+      type: enabled
+      budget_tokens: 63000
+    max_tokens: 64000
+aliases:
+  - claude-4-sonnet-thinking-64k
+  - claude-4-sonnet-thinking
+---
+display_name: claude-4-opus-20250514-base
+api_name:
+  anthropic: claude-opus-4-20250514
+api_kwargs:
+  default:
+    temperature: 1
+aliases:
+  - claude-4-opus-base
+  - claude-4-opus
+---
+display_name: claude-4-opus-20250514-thinking-32k
+api_name:
+  anthropic: claude-opus-4-20250514
+api_kwargs:
+  default:
+    temperature: 1
+    thinking:
+      type: enabled
+      budget_tokens: 31000
+    max_tokens: 32000
+aliases:
+  - claude-4-opus-thinking-32k
+  - claude-4-opus-thinking
+---
+display_name: claude-4-1-opus-20250805-thinking-32k
+api_name:
+  anthropic: claude-opus-4-1-20250805
+api_kwargs:
+  default:
+    temperature: 1
+    thinking:
+      type: enabled
+      budget_tokens: 31000
+    max_tokens: 32000
+aliases:
+  - claude-4-1-opus-thinking-32k
+  - claude-4-1-opus-thinking
+---
+display_name: claude-4-1-opus-20250805-base
+api_name:
+  anthropic: claude-opus-4-1-20250805
+api_kwargs:
+  default:
+    temperature: 1
+aliases:
+  - claude-4-1-opus-base
+  - claude-4-1-opus
+---
+display_name: claude-sonnet-4-5-20250929
+api_name:
+  anthropic: claude-sonnet-4-5-20250929
+api_kwargs:
+  default:
+    temperature: 1
+aliases:
+  - claude-sonnet-4-5
+---
+display_name: claude-sonnet-4-5-20250929-thinking-64k
+api_name:
+  anthropic: claude-sonnet-4-5-20250929
+api_kwargs:
+  default:
+    temperature: 1
+    thinking:
+      type: enabled
+      budget_tokens: 63000
+    max_tokens: 64000
+aliases:
+  - claude-sonnet-4-5-20250929-thinking
+  - claude-sonnet-4-5-thinking
+---
+display_name: claude-haiku-4-5-20251001
+api_name:
+  anthropic: claude-haiku-4-5-20251001
+api_kwargs:
+  default:
+    temperature: 1
+aliases:
+  - claude-haiku-4-5
+---
+display_name: claude-haiku-4-5-20251001-thinking-64k
+api_name:
+  anthropic: claude-haiku-4-5-20251001
+api_kwargs:
+  default:
+    temperature: 1
+    thinking:
+      type: enabled
+      budget_tokens: 63000
+    max_tokens: 64000
+aliases:
+  - claude-haiku-4-5-thinking
+---
+display_name: claude-opus-4-5-20251101-high-effort
+api_name:
+  anthropic: claude-opus-4-5-20251101
+aliases:
+  - claude-opus-4-5-high-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: high
+    betas:
+      - effort-2025-11-24
+---
+display_name: claude-opus-4-5-20251101-thinking-64k-high-effort
+api_name:
+  anthropic: claude-opus-4-5-20251101
+aliases:
+  - claude-opus-4-5-thinking-high-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: high
+    thinking:
+      type: enabled
+      budget_tokens: 63000
+    max_tokens: 64000
+    betas:
+      - effort-2025-11-24
+---
+display_name: claude-opus-4-5-20251101-medium-effort
+api_name:
+  anthropic: claude-opus-4-5-20251101
+aliases:
+  - claude-opus-4-5-medium-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: medium
+    betas:
+      - effort-2025-11-24
+---
+display_name: claude-opus-4-5-20251101-thinking-64k-medium-effort
+api_name:
+  anthropic: claude-opus-4-5-20251101
+aliases:
+  - claude-opus-4-5-thinking-medium-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: medium
+    thinking:
+      type: enabled
+      budget_tokens: 63000
+    max_tokens: 64000
+    betas:
+      - effort-2025-11-24
+---
+display_name: claude-opus-4-5-20251101-low-effort
+api_name:
+  anthropic: claude-opus-4-5-20251101
+aliases:
+  - claude-opus-4-5-low-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: low
+    betas:
+      - effort-2025-11-24
+---
+display_name: claude-opus-4-5-20251101-thinking-64k-low-effort
+api_name:
+  anthropic: claude-opus-4-5-20251101
+aliases:
+  - claude-opus-4-5-thinking-low-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: low
+    thinking:
+      type: enabled
+      budget_tokens: 63000
+    max_tokens: 64000
+    betas:
+      - effort-2025-11-24
+---
+display_name: claude-opus-4-6-thinking-auto-high-effort
+api_name:
+  anthropic: claude-opus-4-6
+aliases:
+  - claude-opus-4-6-thinking
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: high
+    thinking:
+      type: auto
+    max_tokens: 64000
+    betas:
+      - auto-thinking-2026-01-12
+      - effort-2025-11-24
+---
+display_name: claude-sonnet-4-6-thinking-auto-high-effort
+api_name:
+  anthropic: claude-sonnet-4-6
+aliases:
+  - claude-sonnet-4-6-thinking
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: high
+    thinking:
+      type: auto
+    max_tokens: 128000
+    betas:
+      - auto-thinking-2026-01-12
+      - effort-2025-11-24
+---
+display_name: claude-sonnet-4-6-thinking-auto-medium-effort
+api_name:
+  anthropic: claude-sonnet-4-6
+aliases:
+  - claude-sonnet-4-6-thinking-medium-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: medium
+    thinking:
+      type: auto
+    max_tokens: 128000
+    betas:
+      - auto-thinking-2026-01-12
+      - effort-2025-11-24
+---
+display_name: claude-sonnet-4-6-thinking-auto-low-effort
+api_name:
+  anthropic: claude-sonnet-4-6
+aliases:
+  - claude-sonnet-4-6-thinking-low-effort
+api_kwargs:
+  default:
+    temperature: 1
+    extra_body:
+      output_config:
+        effort: low
+    thinking:
+      type: auto
+    max_tokens: 128000
+    betas:
+      - auto-thinking-2026-01-12
+      - effort-2025-11-24

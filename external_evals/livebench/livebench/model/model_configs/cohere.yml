@@ -1,0 +1,39 @@
+# Cohere Models
+---
+display_name: command-r-plus-04-2024
+api_name:
+  https://api.cohere.ai/compatibility/v1: command-r-plus-04-2024
+api_keys:
+  https://api.cohere.ai/compatibility/v1: CO_API_KEY
+---
+display_name: command-r-03-2024
+api_name:
+  https://api.cohere.ai/compatibility/v1: command-r-03-2024
+api_keys:
+  https://api.cohere.ai/compatibility/v1: CO_API_KEY
+---
+display_name: command
+api_name:
+  https://api.cohere.ai/compatibility/v1: command
+api_keys:
+  https://api.cohere.ai/compatibility/v1: CO_API_KEY
+---
+display_name: command-r-08-2024
+api_name:
+  https://api.cohere.ai/compatibility/v1: command-r-08-2024
+api_keys:
+  https://api.cohere.ai/compatibility/v1: CO_API_KEY
+---
+display_name: command-r-plus-08-2024
+api_name:
+  https://api.cohere.ai/compatibility/v1: command-r-plus-08-2024
+api_keys:
+  https://api.cohere.ai/compatibility/v1: CO_API_KEY
+---
+display_name: command-a-03-2025
+api_name:
+  https://api.cohere.ai/compatibility/v1: command-a-03-2025
+api_keys:
+  https://api.cohere.ai/compatibility/v1: CO_API_KEY
+aliases:
+ - command-a

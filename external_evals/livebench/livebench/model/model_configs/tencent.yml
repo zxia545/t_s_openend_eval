@@ -1,0 +1,14 @@
+---
+display_name: hunyuan-turbos-20250515
+api_name:
+  https://api.hunyuan.cloud.tencent.com/v1: hunyuan-turbos-20250515
+aliases:
+  - hunyuan-turbos
+api_keys:
+  https://api.hunyuan.cloud.tencent.com/v1: HUNYUAN_API_KEY
+---
+display_name: hunyuan-turbos-20250313
+api_name:
+  https://api.hunyuan.cloud.tencent.com/v1: hunyuan-turbos-20250313
+api_keys:
+  https://api.hunyuan.cloud.tencent.com/v1: HUNYUAN_API_KEY
