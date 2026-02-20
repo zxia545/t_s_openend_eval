@@ -1,0 +1,20 @@
+models:
+  - id: "qwen2.5-72b-instruct"
+    api_name: "Qwen/Qwen2.5-72B-Instruct"
+    api_base: "http://localhost:8000/v1"
+    api_key: "dummy"
+  - id: "llama-3-70b-instruct"
+    api_name: "meta-llama/Llama-3-70b-chat-hf"
+    api_base: "http://localhost:8001/v1"
+    api_key: "dummy"
+
+judge:
+  api_base: "http://localhost:8000/v1"
+  api_key: "dummy"
+  model_name: "Qwen/Qwen2.5-72B-Instruct"
+
+benchmarks:
+  livebench: true
+  truthfulqa: true
+  ifeval: true
+  alpacaeval: true

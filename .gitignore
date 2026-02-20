@@ -1,0 +1,193 @@
+# ==================== Python ====================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# ==================== Environments ====================
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Conda
+.conda/
+
+# ==================== IDEs and Editors ====================
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# ==================== Jupyter Notebooks ====================
+.ipynb_checkpoints
+*.ipynb
+
+# ==================== OS Generated Files ====================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# ==================== Project Specific ====================
+# Evaluation Results (Large files - DO NOT COMMIT)
+external_evals/results/
+!external_evals/results/.gitkeep
+
+# AlpacaEval Results (Large files - DO NOT COMMIT)
+external_evals/alpaca_eval/results/
+
+# LiveBench Output Files
+external_evals/livebench/livebench/model_answers/
+external_evals/livebench/livebench/model_judgment/
+
+# Log Files
+*.log
+logs/
+
+# Temporary Config Files
+external_evals/tools/temp_config.yaml
+external_evals/tools/config_*.yaml
+external_evals/results/judge_openai_config.yaml
+
+# Test Run Directory
+external_evals/test_run/
+
+# Cache Files
+.ruff_cache/
+.mypy_cache/
+.pytype/
+
+# Data Files (Large)
+*.jsonl
+*.json
+*.csv
+*.parquet
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+
+# But keep small example/config files
+!external_evals/IFEval/instruction_following_eval/data/*.jsonl
+!external_evals/TruthfulQA/truthfulqa/data/*.csv
+
+# Model Checkpoints (Large)
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Data Directories
+data/
+datasets/
+checkpoints/
+models/
+
+# Secrets and API Keys
+secrets.yaml
+secrets.json
+.env.local
+*.key
+secrets/
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Build Artifacts
+*.o
+*.a
+*.out
+
+# ==================== Keep Important Files ====================
+# Keep .gitkeep files
+!.gitkeep
+
+# Keep README files
+!README.md
+!**/README.md
+
+
+.ruff_cache/

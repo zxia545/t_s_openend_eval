@@ -1,0 +1,23 @@
+# Common
+openai>=1.0.0
+pyyaml
+pandas
+tqdm
+requests
+urllib3
+
+# AlpacaEval 2
+alpaca_eval>=0.3.1
+datasets
+
+# IFEval
+absl-py
+gin-config
+
+# TruthfulQA
+bleurt
+nltk
+rouge_score
+
+# LiveBench
+pydantic
