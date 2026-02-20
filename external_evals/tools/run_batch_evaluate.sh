@@ -43,7 +43,7 @@ models:
 
 judge:
   api_base: "https://openrouter.ai/api/v1"
-  api_key: "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"
+  api_key: "sk-or-v1-sf"
   model_name: "${JUDGE_MODEL_NAME}"
 
 benchmarks:
