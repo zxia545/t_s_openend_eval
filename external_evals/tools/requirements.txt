@@ -21,3 +21,5 @@ rouge_score
 
 # LiveBench
 pydantic
+
+vllm
