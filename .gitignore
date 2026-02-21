@@ -6,7 +6,7 @@ __pycache__/
 
 # C extensions
 *.so
-
+!external_evals/IFEval/instruction_following_eval/data/*
 __pycache__/
 
 !external_evals/IFEval/instruction_following_eval/data
