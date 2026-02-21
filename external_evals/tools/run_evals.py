@@ -1,7 +1,6 @@
 import argparse
 import yaml
 import os
-import sys
 import json
 import csv
 import time
@@ -293,7 +292,9 @@ def run_evaluate(config, skip_existing=False):
                 / "alpacaeval2"
                 / "model_outputs.json"
             )
-            alpacaeval_out = ROOT_DIR / "alpaca_eval" / "results" / model["id"] / "leaderboard.csv"
+            alpacaeval_out = (
+                ROOT_DIR / "alpaca_eval" / "results" / model["id"] / "leaderboard.csv"
+            )
             if skip_existing and alpacaeval_out.exists():
                 print(f"[{model['id']}] AlpacaEval2 eval already exists. Skipping.")
             elif in_file.exists():
@@ -301,119 +302,141 @@ def run_evaluate(config, skip_existing=False):
                 try:
                     urllib.request.urlopen(f"{judge_api_base}/models", timeout=5)
                 except Exception as e:
-                    print(f"[ERROR] [{model['id']}] Judge API not reachable at {judge_api_base}: {e}")
-                    print(f"[ERROR] [{model['id']}] Skipping AlpacaEval2 — start the judge server first.")
+                    print(
+                        f"[ERROR] [{model['id']}] Judge API not reachable at {judge_api_base}: {e}"
+                    )
+                    print(
+                        f"[ERROR] [{model['id']}] Skipping AlpacaEval2 — start the judge server first."
+                    )
                     continue_alpaca = False
                 else:
                     continue_alpaca = True
 
                 if continue_alpaca:
                     judge_config_dir = (
-                        ROOT_DIR / "results" / model["id"] / "alpacaeval2" / "judge_config"
+                        ROOT_DIR
+                        / "results"
+                        / model["id"]
+                        / "alpacaeval2"
+                        / "judge_config"
                     )
                     judge_config_dir.mkdir(parents=True, exist_ok=True)
                     with open(judge_config_dir / "configs.yaml", "w") as f:
                         yaml.dump(
                             {
                                 "custom_vllm_judge": {
-                                    "prompt_template": str(ROOT_DIR / "alpaca_eval" / "src" / "alpaca_eval" / "evaluators_configs" / "alpaca_eval_gpt4_turbo_fn" / "alpaca_eval_fn.txt"),
-                                "fn_completions": "openai_completions",
-                                "completions_kwargs": {
-                                    "model_name": judge_model,
-                                      "openai_api_base": judge_api_base,
-                                      "openai_api_keys": [judge_conf.get("api_key", "dummy")],
-                                    "temperature": 0.0,
-                                    "tool_choice": {
-                                        "type": "function",
-                                        "function": {
-                                            "name": "make_partial_leaderboard"
-                                        },
-                                    },
-                                    "tools": [
-                                        {
+                                    "prompt_template": str(
+                                        ROOT_DIR
+                                        / "alpaca_eval"
+                                        / "src"
+                                        / "alpaca_eval"
+                                        / "evaluators_configs"
+                                        / "alpaca_eval_gpt4_turbo_fn"
+                                        / "alpaca_eval_fn.txt"
+                                    ),
+                                    "fn_completions": "openai_completions",
+                                    "completions_kwargs": {
+                                        "model_name": judge_model,
+                                        "openai_api_base": judge_api_base,
+                                        "openai_api_keys": [
+                                            judge_conf.get("api_key", "dummy")
+                                        ],
+                                        "temperature": 0.0,
+                                        "tool_choice": {
                                             "type": "function",
                                             "function": {
-                                                "name": "make_partial_leaderboard",
-                                                "description": "Make a leaderboard of models given a list of the models ordered by the preference of their outputs.",
-                                                "strict": True,
-                                                "parameters": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "ordered_models": {
-                                                            "type": "array",
-                                                            "description": "A list of models ordered by the preference of their outputs. The first model in the list has the best output.",
-                                                            "items": {
-                                                                "type": "object",
-                                                                "properties": {
-                                                                    "model": {
-                                                                        "type": "string",
-                                                                        "description": "The name of the model",
-                                                                    },
-                                                                    "rank": {
-                                                                        "type": "number",
-                                                                        "description": "Order of preference of the model, 1 has the best output",
-                                                                    },
-                                                                },
-                                                                "additionalProperties": False,
-                                                                "required": [
-                                                                    "model",
-                                                                    "rank",
-                                                                ],
-                                                            },
-                                                        }
-                                                    },
-                                                    "additionalProperties": False,
-                                                    "required": ["ordered_models"],
-                                                },
+                                                "name": "make_partial_leaderboard"
                                             },
-                                        }
-                                    ],
-                                },
-                                "fn_completion_parser": "pipeline_meta_parser",
-                                "completion_parser_kwargs": {
-                                    "parsers_to_kwargs": {
-                                        "json_parser": {
-                                            "annotation_key": "ordered_models"
                                         },
-                                        "ranking_parser": {"model_1_name": "m"},
-                                    }
-                                },
-                                "batch_size": 1,
-                            }
-                        },
-                        f,
-                          )
+                                        "tools": [
+                                            {
+                                                "type": "function",
+                                                "function": {
+                                                    "name": "make_partial_leaderboard",
+                                                    "description": "Make a leaderboard of models given a list of the models ordered by the preference of their outputs.",
+                                                    "strict": True,
+                                                    "parameters": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "ordered_models": {
+                                                                "type": "array",
+                                                                "description": "A list of models ordered by the preference of their outputs. The first model in the list has the best output.",
+                                                                "items": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "model": {
+                                                                            "type": "string",
+                                                                            "description": "The name of the model",
+                                                                        },
+                                                                        "rank": {
+                                                                            "type": "number",
+                                                                            "description": "Order of preference of the model, 1 has the best output",
+                                                                        },
+                                                                    },
+                                                                    "additionalProperties": False,
+                                                                    "required": [
+                                                                        "model",
+                                                                        "rank",
+                                                                    ],
+                                                                },
+                                                            }
+                                                        },
+                                                        "additionalProperties": False,
+                                                        "required": ["ordered_models"],
+                                                    },
+                                                },
+                                            }
+                                        ],
+                                    },
+                                    "fn_completion_parser": "pipeline_meta_parser",
+                                    "completion_parser_kwargs": {
+                                        "parsers_to_kwargs": {
+                                            "json_parser": {
+                                                "annotation_key": "ordered_models"
+                                            },
+                                            "ranking_parser": {"model_1_name": "m"},
+                                        }
+                                    },
+                                    "batch_size": 1,
+                                }
+                            },
+                            f,
+                        )
 
-                      cmd = f"""
-                      cd {ROOT_DIR}/alpaca_eval && \\
-                      PYTHONPATH={ROOT_DIR}/alpaca_eval/src:$PYTHONPATH python -m alpaca_eval.main evaluate \\
-                        --model_outputs {in_file} \\
-                        --annotators_config {judge_config_dir} \\
-                        --name "{model["id"]}"
-                      """
-                      os.system(cmd)
+                    cmd = f"""
+                    cd {ROOT_DIR}/alpaca_eval && \\
+                    PYTHONPATH={ROOT_DIR}/alpaca_eval/src:$PYTHONPATH python -m alpaca_eval.main evaluate \\
+                      --model_outputs {in_file} \\
+                      --annotators_config {judge_config_dir} \\
+                      --name "{model["id"]}"
+                    """
+                    os.system(cmd)
         if benchmarks.get("livebench"):
             print(f"[{model['id']}] Evaluating LiveBench...")
             output_dir = ROOT_DIR / "results" / model["id"] / "livebench"
             output_dir.mkdir(parents=True, exist_ok=True)
-            livebench_done = list(output_dir.glob("**/*.jsonl")) if output_dir.exists() else []
+            livebench_done = (
+                list(output_dir.glob("**/*.jsonl")) if output_dir.exists() else []
+            )
             if skip_existing and livebench_done:
-                print(f"[{model['id']}] LiveBench eval already exists ({len(livebench_done)} judgment files). Skipping.")
+                print(
+                    f"[{model['id']}] LiveBench eval already exists ({len(livebench_done)} judgment files). Skipping."
+                )
             else:
-             cmd = f"""
-            cd {ROOT_DIR}/livebench/livebench && \\
-            CUDA_VISIBLE_DEVICES="" python gen_ground_truth_judgment.py \\
-              --bench-name live_bench \\
-              --model "{model["api_name"]}" \\
-              --model-display-name "{model["id"]}" \\
-              --question-source huggingface \\
-              --livebench-release-option "2024-11-25" \\
-              --output-dir "{output_dir}" \\
-              --parallel 8 \\
-              --resume \\
-              --ignore-missing-answers
-             """
-             os.system(cmd)
+                cmd = f"""
+                cd {ROOT_DIR}/livebench/livebench && \\
+                CUDA_VISIBLE_DEVICES="" python gen_ground_truth_judgment.py \\
+                  --bench-name live_bench \\
+                  --model "{model["api_name"]}" \\
+                  --model-display-name "{model["id"]}" \\
+                  --question-source huggingface \\
+                  --livebench-release-option "2024-11-25" \\
+                  --output-dir "{output_dir}" \\
+                  --parallel 8 \\
+                  --resume \\
+                  --ignore-missing-answers
+                """
+                os.system(cmd)
 
 
 if __name__ == "__main__":
