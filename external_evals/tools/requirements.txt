@@ -15,7 +15,7 @@ absl-py
 gin-config
 
 # TruthfulQA
-bleurt
+bleurt @ git+https://github.com/google-research/bleurt.git
 nltk
 rouge_score
 
