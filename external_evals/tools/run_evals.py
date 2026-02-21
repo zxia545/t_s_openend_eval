@@ -238,6 +238,16 @@ def run_evaluate(config):
 
         if benchmarks.get("ifeval"):
             print(f"[{model['id']}] Evaluating IFEval...")
+            import subprocess
+
+            subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)",
+                ],
+                check=False,
+            )
             in_file = (
                 ROOT_DIR
                 / "results"

@@ -14,9 +14,13 @@ BASE_DIR = Path(__file__).parents[2].absolute()
 API_MAX_CONCURRENCY = int(os.environ.get("API_MAX_CONCURRENCY", 5))
 
 OPENAI_MAX_CONCURRENCY = int(os.environ.get("OPENAI_MAX_CONCURRENCY", 5))
-OPENAI_CLIENT_CONFIG_PATH = os.environ.get("OPENAI_CLIENT_CONFIG_PATH", BASE_DIR / "client_configs/openai_configs.yaml")
+OPENAI_CLIENT_CONFIG_PATH = os.environ.get(
+    "OPENAI_CLIENT_CONFIG_PATH", BASE_DIR / "client_configs/openai_configs.yaml"
+)
 # the following is for backward compatibility, the recommended way is to use OPENAI_CLIENT_CONFIG_PATH
-OPENAI_API_KEYS = os.environ.get("OPENAI_API_KEYS", os.environ.get("OPENAI_API_KEY", None))
+OPENAI_API_KEYS = os.environ.get(
+    "OPENAI_API_KEYS", os.environ.get("OPENAI_API_KEY", None)
+)
 if isinstance(OPENAI_API_KEYS, str):
     OPENAI_API_KEYS = OPENAI_API_KEYS.split(",")
 OPENAI_ORGANIZATION_IDS = os.environ.get("OPENAI_ORGANIZATION_IDS", None)
@@ -39,7 +43,9 @@ DATASETS_FORCE_DOWNLOAD = os.environ.get("DATASETS_FORCE_DOWNLOAD", False)
 IS_ALPACA_EVAL_2 = ast.literal_eval(os.environ.get("IS_ALPACA_EVAL_2", "True"))
 ANNOTATOR_CONFIG_AE1 = "alpaca_eval_gpt4"
 ANNOTATOR_CONFIG_AE2 = "weighted_alpaca_eval_gpt4_turbo"
-DEFAULT_ANNOTATOR_CONFIG = ANNOTATOR_CONFIG_AE2 if IS_ALPACA_EVAL_2 else ANNOTATOR_CONFIG_AE1
+DEFAULT_ANNOTATOR_CONFIG = (
+    ANNOTATOR_CONFIG_AE2 if IS_ALPACA_EVAL_2 else ANNOTATOR_CONFIG_AE1
+)
 DEFAULT_CACHE_DIR = None
 EVALUATORS_CONFIG_DIR = CURRENT_DIR / "evaluators_configs"
 MODELS_CONFIG_DIR = CURRENT_DIR / "models_configs"
@@ -78,20 +84,48 @@ ORDERED_LEADERBOARD_MODES = ["minimal", "verified", "community", "dev"]
 
 
 def get_alpaca_eval_data(dataset="alpaca_eval_gpt4_baseline"):
-    dataset = datasets.load_dataset(
-        "tatsu-lab/alpaca_eval",
-        dataset,
-        cache_dir=DEFAULT_CACHE_DIR,
-        token=DATASETS_TOKEN,
-        download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
-    )["eval"]
-    return dataset
+    try:
+        dataset_obj = datasets.load_dataset(
+            "tatsu-lab/alpaca_eval",
+            dataset,
+            cache_dir=DEFAULT_CACHE_DIR,
+            token=DATASETS_TOKEN,
+            download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
+        )
+        return dataset_obj["eval"]
+    except Exception as e:
+        # datasets>=3 doesn't support dataset scripts; fallback to JSON download
+        print(f"[WARN] datasets.load_dataset alpaca_eval failed: {e}")
+        import json
+
+        json_path = hf_hub_download(
+            repo_id="tatsu-lab/alpaca_eval",
+            repo_type="dataset",
+            filename="alpaca_eval.json",
+            cache_dir=DEFAULT_CACHE_DIR,
+            token=DATASETS_TOKEN,
+            force_download=DATASETS_FORCE_DOWNLOAD,
+        )
+        with open(json_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if isinstance(payload, dict):
+            if "eval" in payload:
+                return payload["eval"]
+            if "data" in payload:
+                return payload["data"]
+        if isinstance(payload, list):
+            return payload
+        raise RuntimeError("Unsupported alpaca_eval.json format") from e
 
 
 ALPACAEVAL_REFERENCE_OUTPUTS_2 = get_alpaca_eval_data
 ALPACAEVAL_REFERENCE_OUTPUTS_1 = partial(get_alpaca_eval_data, dataset="alpaca_eval")
 
-ALPACAEVAL_REFERENCE_OUTPUTS = ALPACAEVAL_REFERENCE_OUTPUTS_2 if IS_ALPACA_EVAL_2 else ALPACAEVAL_REFERENCE_OUTPUTS_1
+ALPACAEVAL_REFERENCE_OUTPUTS = (
+    ALPACAEVAL_REFERENCE_OUTPUTS_2
+    if IS_ALPACA_EVAL_2
+    else ALPACAEVAL_REFERENCE_OUTPUTS_1
+)
 
 
 def ALPACAEVAL_INSTRUCTION_PARAMETERS():
@@ -139,22 +173,39 @@ def ALPACAFARM_GOLD_ANNOTATIONS():
 
 ALPACAEVAL_2_LEADERBOARD_PATHS = CURRENT_DIR / f"leaderboards/data_AlpacaEval_2"
 ALPACAEVAL_1_LEADERBOARD_PATHS = CURRENT_DIR / f"leaderboards/data_AlpacaEval"
-ALPACAEVAL_LEADERBOARD_PATHS = ALPACAEVAL_2_LEADERBOARD_PATHS if IS_ALPACA_EVAL_2 else ALPACAEVAL_1_LEADERBOARD_PATHS
+ALPACAEVAL_LEADERBOARD_PATHS = (
+    ALPACAEVAL_2_LEADERBOARD_PATHS
+    if IS_ALPACA_EVAL_2
+    else ALPACAEVAL_1_LEADERBOARD_PATHS
+)
 
 
 PRECOMPUTED_LEADERBOARDS = {
-    (str(ALPACAEVAL_REFERENCE_OUTPUTS_1), "claude"): ALPACAEVAL_1_LEADERBOARD_PATHS / "claude_leaderboard.csv",
-    (str(ALPACAEVAL_REFERENCE_OUTPUTS_1), ANNOTATOR_CONFIG_AE1): ALPACAEVAL_1_LEADERBOARD_PATHS
-    / f"{ANNOTATOR_CONFIG_AE1}_leaderboard.csv",
-    (str(ALPACAEVAL_REFERENCE_OUTPUTS_1), "chatgpt_fn"): ALPACAEVAL_1_LEADERBOARD_PATHS / "chatgpt_fn_leaderboard.csv",
-    (str(ALPACAEVAL_REFERENCE_OUTPUTS_2), ANNOTATOR_CONFIG_AE2): ALPACAEVAL_2_LEADERBOARD_PATHS
-    / f"{ANNOTATOR_CONFIG_AE2}_leaderboard.csv",
-    (str(ALPACAEVAL_REFERENCE_OUTPUTS_2), "weighted_alpaca_eval_gpt4_turbo"): ALPACAEVAL_2_LEADERBOARD_PATHS
+    (str(ALPACAEVAL_REFERENCE_OUTPUTS_1), "claude"): ALPACAEVAL_1_LEADERBOARD_PATHS
+    / "claude_leaderboard.csv",
+    (
+        str(ALPACAEVAL_REFERENCE_OUTPUTS_1),
+        ANNOTATOR_CONFIG_AE1,
+    ): ALPACAEVAL_1_LEADERBOARD_PATHS / f"{ANNOTATOR_CONFIG_AE1}_leaderboard.csv",
+    (str(ALPACAEVAL_REFERENCE_OUTPUTS_1), "chatgpt_fn"): ALPACAEVAL_1_LEADERBOARD_PATHS
+    / "chatgpt_fn_leaderboard.csv",
+    (
+        str(ALPACAEVAL_REFERENCE_OUTPUTS_2),
+        ANNOTATOR_CONFIG_AE2,
+    ): ALPACAEVAL_2_LEADERBOARD_PATHS / f"{ANNOTATOR_CONFIG_AE2}_leaderboard.csv",
+    (
+        str(ALPACAEVAL_REFERENCE_OUTPUTS_2),
+        "weighted_alpaca_eval_gpt4_turbo",
+    ): ALPACAEVAL_2_LEADERBOARD_PATHS
     / f"weighted_alpaca_eval_gpt4_turbo_leaderboard.csv",
-    (str(ALPACAEVAL_REFERENCE_OUTPUTS_2), "mistral-large-2402_ranking"): ALPACAEVAL_2_LEADERBOARD_PATHS
-    / f"mistral-large-2402_ranking_leaderboard.csv",
-    (str(ALPACAEVAL_REFERENCE_OUTPUTS_2), "claude_3_opus_ranking"): ALPACAEVAL_2_LEADERBOARD_PATHS
-    / f"claude_3_opus_ranking_leaderboard.csv",
+    (
+        str(ALPACAEVAL_REFERENCE_OUTPUTS_2),
+        "mistral-large-2402_ranking",
+    ): ALPACAEVAL_2_LEADERBOARD_PATHS / f"mistral-large-2402_ranking_leaderboard.csv",
+    (
+        str(ALPACAEVAL_REFERENCE_OUTPUTS_2),
+        "claude_3_opus_ranking",
+    ): ALPACAEVAL_2_LEADERBOARD_PATHS / f"claude_3_opus_ranking_leaderboard.csv",
     # (str(ALPACAEVAL_REFERENCE_OUTPUTS_2), "gpt-3.5-turbo-1106_ranking"): ALPACAEVAL_2_LEADERBOARD_PATHS
     # / f"gpt-3.5-turbo-1106_ranking_leaderboard.csv",
     # (str(ALPACAEVAL_REFERENCE_OUTPUTS_2), "alpaca_eval_cot_gpt4_turbo_fn"): ALPACAEVAL_2_LEADERBOARD_PATHS
@@ -218,7 +269,10 @@ if CURRENT_USER in ["yanndubs"]:
 
 def ALPACAFARM_ALL_OUTPUTS():
     if IS_ALPACA_EVAL_2:
-        return [f"results/{m}/model_outputs.json" for m in MINIMAL_MODELS_FOR_NEW_LEADERBOARD]
+        return [
+            f"results/{m}/model_outputs.json"
+            for m in MINIMAL_MODELS_FOR_NEW_LEADERBOARD
+        ]
     else:
         return datasets.load_dataset(
             "tatsu-lab/alpaca_eval",
