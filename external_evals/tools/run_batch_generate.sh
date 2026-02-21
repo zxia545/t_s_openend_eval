@@ -467,8 +467,10 @@ if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9._-]+/[a-z
 
         if [ ${#checkpoint_subdirs[@]} -gt 0 ]; then
             echo "[INFO] 检测到 checkpoint 子目录，共 ${#checkpoint_subdirs[@]} 个；同时将输入目录作为 final model 运行"
+            parent_model_name="$(basename "$MODEL_INPUT")"
             for model_path in "${checkpoint_subdirs[@]}"; do
-                add_model "$model_path" "$(basename "$model_path")"
+                checkpoint_name="$(basename "$model_path")"
+                add_model "$model_path" "${parent_model_name}_${checkpoint_name}"
             done
             add_model "$MODEL_INPUT" "$(basename "$MODEL_INPUT")"
         elif [ ${#visible_subdirs[@]} -gt 0 ]; then

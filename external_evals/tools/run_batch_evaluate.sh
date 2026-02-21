@@ -27,9 +27,12 @@ set -euo pipefail
 
 # ==================== 默认配置 ====================
 DEFAULT_BENCHMARKS="ifeval,truthfulqa,alpacaeval,livebench"
-DEFAULT_JUDGE_API_BASE="https://openrouter.ai/api/v1"
-DEFAULT_JUDGE_API_KEY="sk-or-v1-sf"
-DEFAULT_JUDGE_MODEL="stepfun/step-3.5-flash:free"
+DEFAULT_JUDGE_API_BASE="vllm"
+DEFAULT_JUDGE_API_KEY="dummy"
+DEFAULT_JUDGE_MODEL="/home/aiscuser/zhengyu_blob_home/hugging_face_models/model--Qwen-Qwen2.5-72B-Instruct"
+DEFAULT_JUDGE_PORT=8065
+DEFAULT_JUDGE_GPU_MEM=0.85
+DEFAULT_JUDGE_TP_SIZE=0
 
 # ==================== 帮助信息 ====================
 show_help() {
@@ -48,10 +51,15 @@ Flexible Batch Evaluation Script for LLM Evaluation
     -b, --benchmarks LIST  要评估的 benchmarks (逗号分隔)
                            (默认: $DEFAULT_BENCHMARKS)
     --judge-api-base URL   Judge API 地址
-                           (默认: OpenRouter)
+                           (默认: vllm)
     --judge-api-key KEY    Judge API 密钥
     --judge-model NAME     Judge 模型名称
-                           (默认: $DEFAULT_JUDGE_MODEL)
+                            (默认: $DEFAULT_JUDGE_MODEL)
+    --judge-port PORT      本地 vLLM Judge 端口 (默认: $DEFAULT_JUDGE_PORT)
+    --judge-gpu-mem UTIL   本地 vLLM Judge GPU 内存使用率 (默认: $DEFAULT_JUDGE_GPU_MEM)
+    --judge-tp-size SIZE   本地 vLLM Judge TP 大小，0=自动=GPU数量
+                           (默认: $DEFAULT_JUDGE_TP_SIZE)
+    --dry-run              只打印计划，不实际执行评估
     --skip-existing        跳过已有评估结果的模型
     -h, --help             显示此帮助信息
 
@@ -77,7 +85,15 @@ BENCHMARKS=$DEFAULT_BENCHMARKS
 JUDGE_API_BASE=$DEFAULT_JUDGE_API_BASE
 JUDGE_API_KEY=$DEFAULT_JUDGE_API_KEY
 JUDGE_MODEL=$DEFAULT_JUDGE_MODEL
+JUDGE_PORT=$DEFAULT_JUDGE_PORT
+JUDGE_GPU_MEM=$DEFAULT_JUDGE_GPU_MEM
+JUDGE_TP_SIZE=$DEFAULT_JUDGE_TP_SIZE
 SKIP_EXISTING=false
+DRY_RUN=false
+
+LOCAL_JUDGE_MODE=false
+LOCAL_JUDGE_VLLM_PID=""
+LOCAL_JUDGE_MODEL_API_NAME=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -96,6 +112,22 @@ while [[ $# -gt 0 ]]; do
         --judge-model)
             JUDGE_MODEL="$2"
             shift 2
+            ;;
+        --judge-port)
+            JUDGE_PORT="$2"
+            shift 2
+            ;;
+        --judge-gpu-mem)
+            JUDGE_GPU_MEM="$2"
+            shift 2
+            ;;
+        --judge-tp-size)
+            JUDGE_TP_SIZE="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
             ;;
         --skip-existing)
             SKIP_EXISTING=true
@@ -139,6 +171,154 @@ source /root/miniconda3/etc/profile.d/conda.sh 2>/dev/null || true
 conda activate learnarena 2>/dev/null || true
 
 # ==================== 辅助函数 ====================
+
+join_by() {
+    local IFS="$1"
+    shift
+    echo "$*"
+}
+
+sanitize_for_filename() {
+    echo "$1" | tr '/: ' '___'
+}
+
+split_csv_to_array() {
+    local csv="$1"
+    local -n out_arr="$2"
+    out_arr=()
+    if [ -z "$csv" ]; then
+        return 0
+    fi
+    IFS=',' read -ra out_arr <<< "$csv"
+    for i in "${!out_arr[@]}"; do
+        out_arr[$i]="$(echo "${out_arr[$i]}" | tr -d ' ')"
+    done
+}
+
+detect_gpu_ids() {
+    local -n out_arr="$1"
+    out_arr=()
+
+    if [ -n "${CUDA_VISIBLE_DEVICES-}" ]; then
+        split_csv_to_array "$CUDA_VISIBLE_DEVICES" out_arr
+        if [ ${#out_arr[@]} -gt 0 ] && [ -n "${out_arr[0]}" ]; then
+            return 0
+        fi
+    fi
+
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        mapfile -t out_arr < <(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | tr -d ' ')
+        if [ ${#out_arr[@]} -gt 0 ]; then
+            return 0
+        fi
+    fi
+
+    out_arr=("0")
+}
+
+wait_for_server() {
+    local port=$1
+    local timeout=180
+    local elapsed=0
+
+    while [ $elapsed -lt $timeout ]; do
+        if curl -s "http://localhost:${port}/v1/models" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    return 1
+}
+
+should_use_local_vllm_judge() {
+    [ "$JUDGE_API_BASE" = "vllm" ]
+}
+
+stop_local_judge_vllm() {
+    if [ -n "$LOCAL_JUDGE_VLLM_PID" ]; then
+        echo "[INFO] 停止本地 Judge vLLM 服务..."
+        kill "$LOCAL_JUDGE_VLLM_PID" 2>/dev/null || true
+        wait "$LOCAL_JUDGE_VLLM_PID" 2>/dev/null || true
+    fi
+}
+
+start_local_judge_vllm() {
+    GPU_IDS=()
+    detect_gpu_ids GPU_IDS
+    GPU_COUNT=${#GPU_IDS[@]}
+
+    if [ "$GPU_COUNT" -lt 1 ]; then
+        echo "[ERROR] 未检测到可用 GPU，无法启动本地 vLLM Judge"
+        exit 1
+    fi
+
+    local tp="$JUDGE_TP_SIZE"
+    if ! [[ "$tp" =~ ^[0-9]+$ ]]; then
+        echo "[ERROR] --judge-tp-size 必须是非负整数: $tp"
+        exit 1
+    fi
+    if [ "$tp" -eq 0 ]; then
+        tp="$GPU_COUNT"
+    fi
+    if [ "$tp" -gt "$GPU_COUNT" ]; then
+        echo "[ERROR] judge TP_SIZE($tp) > 可用 GPU 数($GPU_COUNT)"
+        exit 1
+    fi
+
+    if ! [[ "$JUDGE_PORT" =~ ^[0-9]+$ ]]; then
+        echo "[ERROR] --judge-port 必须是整数: $JUDGE_PORT"
+        exit 1
+    fi
+
+    LOCAL_JUDGE_MODEL_API_NAME="$(basename "$JUDGE_MODEL")"
+    if [ -z "$LOCAL_JUDGE_MODEL_API_NAME" ] || [ "$LOCAL_JUDGE_MODEL_API_NAME" = "." ] || [ "$LOCAL_JUDGE_MODEL_API_NAME" = "/" ]; then
+        LOCAL_JUDGE_MODEL_API_NAME="local_judge_model"
+    fi
+    local cuda_ids
+    cuda_ids="$(join_by , "${GPU_IDS[@]}")"
+    local log_file="$TOOLS_DIR/vllm_judge_$(sanitize_for_filename "$LOCAL_JUDGE_MODEL_API_NAME")_p${JUDGE_PORT}.log"
+
+    echo "[INFO] 启动本地 vLLM Judge: model=$JUDGE_MODEL | served_name=$LOCAL_JUDGE_MODEL_API_NAME | cuda=$cuda_ids | tp=$tp | port=$JUDGE_PORT"
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY-RUN] would start local judge vLLM -> $log_file"
+        JUDGE_API_BASE="http://localhost:${JUDGE_PORT}/v1"
+        JUDGE_MODEL="$LOCAL_JUDGE_MODEL_API_NAME"
+        LOCAL_JUDGE_MODE=true
+        return 0
+    fi
+
+    if command -v conda >/dev/null 2>&1; then
+        CUDA_VISIBLE_DEVICES="$cuda_ids" conda run -n vllm python -m vllm.entrypoints.openai.api_server \
+            --model "$JUDGE_MODEL" \
+            --served-model-name "$LOCAL_JUDGE_MODEL_API_NAME" \
+            --port "$JUDGE_PORT" \
+            --gpu-memory-utilization "$JUDGE_GPU_MEM" \
+            --tensor-parallel-size "$tp" \
+            --trust-remote-code \
+            > "$log_file" 2>&1 &
+    else
+        CUDA_VISIBLE_DEVICES="$cuda_ids" python -m vllm.entrypoints.openai.api_server \
+            --model "$JUDGE_MODEL" \
+            --served-model-name "$LOCAL_JUDGE_MODEL_API_NAME" \
+            --port "$JUDGE_PORT" \
+            --gpu-memory-utilization "$JUDGE_GPU_MEM" \
+            --tensor-parallel-size "$tp" \
+            --trust-remote-code \
+            > "$log_file" 2>&1 &
+    fi
+    LOCAL_JUDGE_VLLM_PID=$!
+    LOCAL_JUDGE_MODE=true
+
+    if ! wait_for_server "$JUDGE_PORT"; then
+        echo "[ERROR] 本地 Judge vLLM 启动失败，日志: $log_file"
+        stop_local_judge_vllm
+        exit 1
+    fi
+
+    JUDGE_API_BASE="http://localhost:${JUDGE_PORT}/v1"
+    JUDGE_MODEL="$LOCAL_JUDGE_MODEL_API_NAME"
+}
 
 # 检查是否已有评估结果
 check_existing_eval_results() {
@@ -240,7 +420,10 @@ run_model_evaluate() {
     
     # 运行评估
     echo "[INFO] 开始评估 (Judge: $JUDGE_MODEL)..."
-    if python "$TOOLS_DIR/run_evals.py" "$config_file" --phase evaluate; then
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY-RUN] would run: python $TOOLS_DIR/run_evals.py $config_file --phase evaluate"
+        echo "[INFO] ✓ dry-run 评估计划完成: $model_id"
+    elif python "$TOOLS_DIR/run_evals.py" "$config_file" --phase evaluate; then
         echo "[INFO] ✓ 评估完成: $model_id"
     else
         echo "[ERROR] ✗ 评估失败: $model_id"
@@ -257,20 +440,53 @@ run_model_evaluate() {
 # 获取模型 ID 列表
 get_model_ids() {
     local input=$1
-    
-    if [ -d "$input" ]; then
-        # 文件夹 - 检查是 checkpoints 目录还是 results 目录
-        if [[ "$input" == *"results"* ]]; then
-            # results 目录
-            ls -1 "$input" 2>/dev/null
-        else
-            # checkpoints 目录 - 获取子目录名
-            find "$input" -maxdepth 1 -mindepth 1 -type d -exec basename {} \; 2>/dev/null
-        fi
-    else
-        # 直接是模型 ID
+
+    if [ ! -d "$input" ]; then
         echo "$input"
+        return
     fi
+
+    if [[ "$input" == *"results"* ]]; then
+        ls -1 "$input" 2>/dev/null
+        return
+    fi
+
+    mapfile -t subdirs < <(find "$input" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort)
+    visible_subdirs=()
+    for model_path in "${subdirs[@]}"; do
+        child_name="$(basename "$model_path")"
+        if [[ "$child_name" == .* ]]; then
+            continue
+        fi
+        visible_subdirs+=("$model_path")
+    done
+
+    checkpoint_subdirs=()
+    for model_path in "${visible_subdirs[@]}"; do
+        child_name="$(basename "$model_path")"
+        if [[ "$child_name" == checkpoint* ]]; then
+            checkpoint_subdirs+=("$model_path")
+        fi
+    done
+
+    if [ ${#checkpoint_subdirs[@]} -gt 0 ]; then
+        parent_model_name="$(basename "$input")"
+        for model_path in "${checkpoint_subdirs[@]}"; do
+            checkpoint_name="$(basename "$model_path")"
+            echo "${parent_model_name}_${checkpoint_name}"
+        done
+        echo "$parent_model_name"
+        return
+    fi
+
+    if [ ${#visible_subdirs[@]} -gt 0 ]; then
+        for model_path in "${visible_subdirs[@]}"; do
+            echo "$(basename "$model_path")"
+        done
+        return
+    fi
+
+    echo "$(basename "$input")"
 }
 
 # ==================== 主逻辑 ====================
@@ -284,8 +500,17 @@ echo "  Model Input:    $MODEL_INPUT"
 echo "  Benchmarks:     $BENCHMARKS"
 echo "  Judge API:      $JUDGE_API_BASE"
 echo "  Judge Model:    $JUDGE_MODEL"
+echo "  Judge Port:     $JUDGE_PORT"
+echo "  Judge TP Size:  $JUDGE_TP_SIZE"
 echo "  Skip Existing:  $SKIP_EXISTING"
+echo "  Dry Run:        $DRY_RUN"
 echo ""
+
+if should_use_local_vllm_judge; then
+    start_local_judge_vllm
+    trap 'stop_local_judge_vllm' EXIT
+    echo "[INFO] 使用本地 vLLM Judge: api_base=$JUDGE_API_BASE | model=$JUDGE_MODEL"
+fi
 
 # 获取模型 ID 列表
 MODEL_IDS=$(get_model_ids "$MODEL_INPUT")
