@@ -259,7 +259,7 @@ def run_evaluate(config):
             if in_file.exists():
                 cmd = f"""
                 cd {ROOT_DIR}/IFEval && \\
-                PYTHONPATH={ROOT_DIR}/IFEval python -m instruction_following_eval.evaluation_main \\
+                CUDA_VISIBLE_DEVICES="" PYTHONPATH={ROOT_DIR}/IFEval python -m instruction_following_eval.evaluation_main \\
                   --input_data=instruction_following_eval/data/input_data.jsonl \\
                   --input_response_data={in_file} \\
                   --output_dir={out_dir}
@@ -279,7 +279,7 @@ def run_evaluate(config):
             if in_file.exists():
                 cmd = f"""
                 cd {ROOT_DIR}/TruthfulQA && \\
-                python -m truthfulqa.evaluate \\
+                CUDA_VISIBLE_DEVICES="" python -m truthfulqa.evaluate \\
                   --models "{model["id"]}" \\
                   --metrics mc bleu rouge bleurt \\
                   --input_path {in_file} \\
@@ -397,7 +397,7 @@ def run_evaluate(config):
 
                 cmd = f"""
                 cd {ROOT_DIR}/alpaca_eval && \\
-                alpaca_eval evaluate \\
+                PYTHONPATH={ROOT_DIR}/alpaca_eval/src:$PYTHONPATH python -m alpaca_eval.main evaluate \\
                   --model_outputs {in_file} \\
                   --annotators_config {judge_config_dir} \\
                   --name "{model["id"]}"
@@ -410,7 +410,7 @@ def run_evaluate(config):
             output_dir.mkdir(parents=True, exist_ok=True)
             cmd = f"""
             cd {ROOT_DIR}/livebench/livebench && \\
-            python gen_ground_truth_judgment.py \\
+            CUDA_VISIBLE_DEVICES="" python gen_ground_truth_judgment.py \\
               --bench-name live_bench \\
               --model "{model["api_name"]}" \\
               --model-display-name "{model["id"]}" \\

@@ -235,6 +235,19 @@ should_use_local_vllm_judge() {
     [ "$JUDGE_API_BASE" = "vllm" ]
 }
 
+benchmarks_need_llm_judge() {
+    IFS=',' read -ra BENCH_ARRAY <<< "$BENCHMARKS"
+    for bench in "${BENCH_ARRAY[@]}"; do
+        bench="$(echo "$bench" | tr -d ' ')"
+        case "$bench" in
+            alpacaeval)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 stop_local_judge_vllm() {
     if [ -n "$LOCAL_JUDGE_VLLM_PID" ]; then
         echo "[INFO] 停止本地 Judge vLLM 服务..."
@@ -506,10 +519,12 @@ echo "  Skip Existing:  $SKIP_EXISTING"
 echo "  Dry Run:        $DRY_RUN"
 echo ""
 
-if should_use_local_vllm_judge; then
+if benchmarks_need_llm_judge && should_use_local_vllm_judge; then
     start_local_judge_vllm
     trap 'stop_local_judge_vllm' EXIT
     echo "[INFO] 使用本地 vLLM Judge: api_base=$JUDGE_API_BASE | model=$JUDGE_MODEL"
+elif should_use_local_vllm_judge; then
+    echo "[INFO] 本次 benchmarks 未包含需要 LLM judge 的项，将不启动 vLLM Judge"
 fi
 
 # 获取模型 ID 列表

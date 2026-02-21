@@ -6,6 +6,7 @@ from pathlib import Path
 
 import datasets
 from huggingface_hub import hf_hub_download
+import pandas as pd
 
 CURRENT_DIR = Path(__file__).parent.absolute()
 BASE_DIR = Path(__file__).parents[2].absolute()
@@ -37,7 +38,9 @@ COHERE_API_KEY = os.environ.get("COHERE_API_KEY", None)
 
 DATASETS_TOKEN = os.environ.get("DATASETS_TOKEN", None)
 HUGGINGFACEHUB_API_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", None)
-DATASETS_FORCE_DOWNLOAD = os.environ.get("DATASETS_FORCE_DOWNLOAD", False)
+DATASETS_FORCE_DOWNLOAD = ast.literal_eval(
+    os.environ.get("DATASETS_FORCE_DOWNLOAD", "False")
+)
 ########################
 
 IS_ALPACA_EVAL_2 = ast.literal_eval(os.environ.get("IS_ALPACA_EVAL_2", "True"))
@@ -91,10 +94,10 @@ def get_alpaca_eval_data(dataset="alpaca_eval_gpt4_baseline"):
             cache_dir=DEFAULT_CACHE_DIR,
             token=DATASETS_TOKEN,
             download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
+            split="eval",
         )
-        return dataset_obj["eval"]
+        return dataset_obj
     except Exception as e:
-        # datasets>=3 doesn't support dataset scripts; fallback to JSON download
         print(f"[WARN] datasets.load_dataset alpaca_eval failed: {e}")
         import json
 
@@ -104,7 +107,7 @@ def get_alpaca_eval_data(dataset="alpaca_eval_gpt4_baseline"):
             filename="alpaca_eval.json",
             cache_dir=DEFAULT_CACHE_DIR,
             token=DATASETS_TOKEN,
-            force_download=DATASETS_FORCE_DOWNLOAD,
+            force_download=bool(DATASETS_FORCE_DOWNLOAD),
         )
         with open(json_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
@@ -133,22 +136,24 @@ def ALPACAEVAL_INSTRUCTION_PARAMETERS():
         repo_id="tatsu-lab/alpaca_eval",
         filename="instruction_difficulty.csv",
         repo_type="dataset",
-        force_download=DATASETS_FORCE_DOWNLOAD,
+        force_download=bool(DATASETS_FORCE_DOWNLOAD),
         cache_dir=DEFAULT_CACHE_DIR,
         token=DATASETS_TOKEN,
     )
-    pd.read_csv(out, index_col=0).squeeze()
+    df = pd.read_csv(out, index_col=0).squeeze()
     return df
 
 
 def ALPACAFARM_GOLD_CROSSANNOTATIONS():
-    df = datasets.load_dataset(
+    ds = datasets.load_dataset(
         "tatsu-lab/alpaca_eval",
         "alpaca_farm_human_crossannotations",
         cache_dir=DEFAULT_CACHE_DIR,
         token=DATASETS_TOKEN,
         download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
-    )["validation"].to_pandas()
+        split="validation",
+    )
+    df = pd.DataFrame(list(ds))
 
     # turkers took around 9 min for 15 examples in AlpacaFarm
     df["time_per_example"] = 9.2 * 60 / 15
@@ -157,13 +162,15 @@ def ALPACAFARM_GOLD_CROSSANNOTATIONS():
 
 
 def ALPACAFARM_GOLD_ANNOTATIONS():
-    df = datasets.load_dataset(
+    ds = datasets.load_dataset(
         "tatsu-lab/alpaca_eval",
         "alpaca_farm_human_annotations",
         cache_dir=DEFAULT_CACHE_DIR,
         token=DATASETS_TOKEN,
         download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
-    )["validation"].to_pandas()
+        split="validation",
+    )
+    df = pd.DataFrame(list(ds))
 
     # turkers took around 9 min for 15 examples in AlpacaFarm
     df["time_per_example"] = 9.2 * 60 / 15
@@ -274,10 +281,28 @@ def ALPACAFARM_ALL_OUTPUTS():
             for m in MINIMAL_MODELS_FOR_NEW_LEADERBOARD
         ]
     else:
-        return datasets.load_dataset(
-            "tatsu-lab/alpaca_eval",
-            "alpaca_eval_all_outputs",
-            cache_dir=DEFAULT_CACHE_DIR,
-            token=DATASETS_TOKEN,
-            download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
-        )["eval"]
+        try:
+            return datasets.load_dataset(
+                "tatsu-lab/alpaca_eval",
+                "alpaca_eval_all_outputs",
+                cache_dir=DEFAULT_CACHE_DIR,
+                token=DATASETS_TOKEN,
+                download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
+                split="eval",
+            )
+        except Exception as e:
+            import json
+
+            json_path = hf_hub_download(
+                repo_id="tatsu-lab/alpaca_eval",
+                repo_type="dataset",
+                filename="alpaca_eval_all_outputs.json",
+                cache_dir=DEFAULT_CACHE_DIR,
+                token=DATASETS_TOKEN,
+                force_download=bool(DATASETS_FORCE_DOWNLOAD),
+            )
+            with open(json_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, list):
+                return payload
+            raise RuntimeError("Unsupported alpaca_eval_all_outputs.json format") from e

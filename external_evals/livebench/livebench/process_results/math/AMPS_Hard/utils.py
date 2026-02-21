@@ -28,6 +28,7 @@ except ModuleNotFoundError:
 please install lark via pip install lark",
     )
 
+
 def run_with_timeout(func, args=(), timeout=8):
     def wrapper(queue):
         try:
@@ -51,13 +52,14 @@ def run_with_timeout(func, args=(), timeout=8):
         raise result
     return result
 
+
 def amps_hard_process_results(ground_truth: str, llm_answer: str, debug=False) -> int:
     retval = 0
     parsed_answer = None
 
     if isinstance(ground_truth, list):
         ground_truth = ground_truth[-1]
-    llm_answer = llm_answer.replace("+C","")
+    llm_answer = llm_answer.replace("+C", "")
     llm_answer = llm_answer.replace("+ C", "")
     llm_answer = llm_answer.replace("+ c", "")
     llm_answer = llm_answer.replace("+c", "")
@@ -86,18 +88,18 @@ def amps_hard_process_results(ground_truth: str, llm_answer: str, debug=False) -
 
     if parsed_answer is None:
         # try to extract from the last block of $ $
-        last_line = llm_answer.split('\n')[-1]
-        if last_line.count('$') >= 2:
-            close_pos = last_line.rfind('$')
-            if last_line[close_pos - 1] == '$':
+        last_line = llm_answer.split("\n")[-1]
+        if last_line.count("$") >= 2:
+            close_pos = last_line.rfind("$")
+            if last_line[close_pos - 1] == "$":
                 # make sure this works with $$ $$ blocks too
                 close_pos -= 1
-            open_pos = last_line.rfind('$', 0, close_pos)
-            math = last_line[open_pos + 1:close_pos]
-            if '=' in math:
-                math = math.split('=')[-1].strip()
-            elif '\\quad \\text{or} \\quad' in math:
-                math = math.split('\\quad \\text{or} \\quad')[-1].strip()
+            open_pos = last_line.rfind("$", 0, close_pos)
+            math = last_line[open_pos + 1 : close_pos]
+            if "=" in math:
+                math = math.split("=")[-1].strip()
+            elif "\\quad \\text{or} \\quad" in math:
+                math = math.split("\\quad \\text{or} \\quad")[-1].strip()
             parsed_answer = normalize_final_answer(math)
 
     if parsed_answer is not None:
@@ -109,25 +111,25 @@ def amps_hard_process_results(ground_truth: str, llm_answer: str, debug=False) -
         except Exception as e:
             warnings.warn(f"Error when comparing ground truth and parsed answer: {e}")
 
-        if not res and os.environ.get('OPENAI_API_KEY'):
+        if not res and os.environ.get("OPENAI_API_KEY"):
             # Use LLM
             res = is_equiv_llm(ground_truth, parsed_answer)
 
         if res:
             retval = 1
     else:
-        if len(llm_answer) > 0 and llm_answer[-1] == '.':
+        if len(llm_answer) > 0 and llm_answer[-1] == ".":
             llm_answer = llm_answer[:-1]
-        if ground_truth == llm_answer[-len(ground_truth):]:
-            parsed_answer = llm_answer[-len(ground_truth):]
+        if ground_truth == llm_answer[-len(ground_truth) :]:
+            parsed_answer = llm_answer[-len(ground_truth) :]
             retval = 1
 
     if debug and retval == 0:
-        print('INCORRECT')
-        print('GROUND TRUTH', ground_truth)
+        print("INCORRECT")
+        print("GROUND TRUTH", ground_truth)
         if parsed_answer:
-            print('SOLUTION', parsed_answer)
-        print('END OF OUTPUT', '\n'.join(llm_answer.split('\n')[-2:]))
+            print("SOLUTION", parsed_answer)
+        print("END OF OUTPUT", "\n".join(llm_answer.split("\n")[-2:]))
     return retval
 
 
@@ -147,19 +149,20 @@ def amps_hard_process_results(ground_truth: str, llm_answer: str, debug=False) -
 #     def __exit__(self, type, value, traceback):
 #         signal.alarm(0)
 
+
 def parse(x: str) -> list[sympy.Expr]:
     try:
         # first try to parse normally
-        parsed_xs = parse_latex(x, backend='lark')
+        parsed_xs = parse_latex(x, backend="lark")
     except (
         sympy.parsing.latex.errors.LaTeXParsingError,
         sympy.SympifyError,
         TypeError,
-        Exception
+        Exception,
     ):
         try:
             # this almost only happened for amazon.nova-pro-v1:0 where it outputs e.g. \\frac or \\sqrt all the time
-            parsed_xs = parse_latex(x.replace('\\\\', '\\'), backend='lark')
+            parsed_xs = parse_latex(x.replace("\\\\", "\\"), backend="lark")
         except:
             try:
                 # if all else fails, try to parse using default backend
@@ -181,7 +184,6 @@ def is_equiv(x1: str, x2: str) -> bool:
     x1 and x2 are normalized latex string
     """
     try:
-
         parsed_x1s = parse(x1)
         parsed_x2s = parse(x2)
 
@@ -189,9 +191,9 @@ def is_equiv(x1: str, x2: str) -> bool:
             return False
 
         errors = []
+        simplify_timeout = int(os.environ.get("AMPS_HARD_SIMPLIFY_TIMEOUT", "15"))
         for parsed_x1 in parsed_x1s:
             for parsed_x2 in parsed_x2s:
-
                 try:
                     diff = parsed_x1 - parsed_x2
                 except Exception as e:
@@ -199,14 +201,22 @@ def is_equiv(x1: str, x2: str) -> bool:
                     continue
 
                 try:
-                    simplified_diff = run_with_timeout(sympy.simplify, args=(diff,), timeout=60)
-                    if simplified_diff == 0:
-                        return True
+                    simplified_diff = run_with_timeout(
+                        sympy.simplify, args=(diff,), timeout=simplify_timeout
+                    )
                 except Exception as e:
-                    errors.append(f"couldn't compare simplified {x1} - {x2} with 0: {e}")
+                    errors.append(
+                        f"couldn't compare simplified {x1} - {x2} with 0: {e}"
+                    )
+                    continue
 
                 try:
-                    simplified_diff = run_with_timeout(sympy.simplify, args=(diff,), timeout=60)
+                    if simplified_diff == 0:
+                        return True
+                except Exception:
+                    pass
+
+                try:
                     if sympy.Abs(simplified_diff) < 0.001:
                         return True
                 except Exception as e:
@@ -217,12 +227,13 @@ def is_equiv(x1: str, x2: str) -> bool:
             warnings.warn(error)
         return False
     except ImportError as e:
-        warnings.warn(e)
+        warnings.warn(str(e))
         raise
     except Exception as e:
         warnings.warn(f"Failed comparing {x1} and {x2}: {e}")
         traceback.print_tb(e.__traceback__)
         return False
+
 
 def is_equiv_llm(x1: str, x2: str) -> bool:
     """
@@ -230,17 +241,22 @@ def is_equiv_llm(x1: str, x2: str) -> bool:
     """
     try:
         import openai
+
         client = openai.Client()
-        response = client.chat.completions.create(model='o3', messages=[
-            {
-                'role': 'user',
-                'content': f'Are these latex expressions equivalent or negatives of each other. Reply yes or no: \n "{x1}" and "{x2}"'
-            }
-        ])
-        if response.choices[0].message.content.lower() == 'yes':
+        response = client.chat.completions.create(
+            model="o3",
+            messages=[
+                {
+                    "role": "user",
+                    "content": f'Are these latex expressions equivalent or negatives of each other. Reply yes or no: \n "{x1}" and "{x2}"',
+                }
+            ],
+        )
+        content = response.choices[0].message.content
+        if content and content.lower() == "yes":
             return True
         return False
-    except Exception:
+    except Exception as e:
         warnings.warn(f"Failed using LLM to comparing {x1} and {x2}: {e}")
         traceback.print_tb(e.__traceback__)
     return False
