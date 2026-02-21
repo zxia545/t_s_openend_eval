@@ -5,6 +5,7 @@ import sys
 import json
 import csv
 import time
+import urllib.request
 import concurrent.futures
 from openai import OpenAI
 from pathlib import Path
@@ -296,42 +297,31 @@ def run_evaluate(config, skip_existing=False):
             if skip_existing and alpacaeval_out.exists():
                 print(f"[{model['id']}] AlpacaEval2 eval already exists. Skipping.")
             elif in_file.exists():
-                config_yaml = (
-                    ROOT_DIR
-                    / "results"
-                    / model["id"]
-                    / "alpacaeval2"
-                    / "judge_config.yaml"
-                )
-                config_yaml.parent.mkdir(parents=True, exist_ok=True)
-                with open(config_yaml, "w") as f:
-                    yaml.dump(
-                        {
-                            judge_model: [
-                                {
-                                    "base_url": judge_api_base,
-                                    "api_key": judge_conf.get("api_key", "dummy"),
-                                }
-                            ]
-                        },
-                        f,
+                # Verify judge API is reachable before attempting evaluation
+                try:
+                    urllib.request.urlopen(f"{judge_api_base}/models", timeout=5)
+                except Exception as e:
+                    print(f"[ERROR] [{model['id']}] Judge API not reachable at {judge_api_base}: {e}")
+                    print(f"[ERROR] [{model['id']}] Skipping AlpacaEval2 — start the judge server first.")
+                    continue_alpaca = False
+                else:
+                    continue_alpaca = True
+
+                if continue_alpaca:
+                    judge_config_dir = (
+                        ROOT_DIR / "results" / model["id"] / "alpacaeval2" / "judge_config"
                     )
-
-                os.environ["OPENAI_CLIENT_CONFIG_PATH"] = str(config_yaml)
-
-                judge_config_dir = (
-                    ROOT_DIR / "results" / model["id"] / "alpacaeval2" / "judge_config"
-                )
-                judge_config_dir.mkdir(parents=True, exist_ok=True)
-                with open(judge_config_dir / "configs.yaml", "w") as f:
-                    yaml.dump(
-                        {
-                            "custom_vllm_judge": {
-                                "prompt_template": str(ROOT_DIR / "alpaca_eval" / "src" / "alpaca_eval" / "evaluators_configs" / "alpaca_eval_gpt4_turbo_fn" / "alpaca_eval_fn.txt"),
+                    judge_config_dir.mkdir(parents=True, exist_ok=True)
+                    with open(judge_config_dir / "configs.yaml", "w") as f:
+                        yaml.dump(
+                            {
+                                "custom_vllm_judge": {
+                                    "prompt_template": str(ROOT_DIR / "alpaca_eval" / "src" / "alpaca_eval" / "evaluators_configs" / "alpaca_eval_gpt4_turbo_fn" / "alpaca_eval_fn.txt"),
                                 "fn_completions": "openai_completions",
                                 "completions_kwargs": {
                                     "model_name": judge_model,
-                                    "max_tokens": 100,
+                                      "openai_api_base": judge_api_base,
+                                      "openai_api_keys": [judge_conf.get("api_key", "dummy")],
                                     "temperature": 0.0,
                                     "tool_choice": {
                                         "type": "function",
@@ -392,17 +382,16 @@ def run_evaluate(config, skip_existing=False):
                             }
                         },
                         f,
-                    )
+                          )
 
-                cmd = f"""
-                cd {ROOT_DIR}/alpaca_eval && \\
-                PYTHONPATH={ROOT_DIR}/alpaca_eval/src:$PYTHONPATH python -m alpaca_eval.main evaluate \\
-                  --model_outputs {in_file} \\
-                  --annotators_config {judge_config_dir} \\
-                  --name "{model["id"]}"
-                """
-                os.system(cmd)
-
+                      cmd = f"""
+                      cd {ROOT_DIR}/alpaca_eval && \\
+                      PYTHONPATH={ROOT_DIR}/alpaca_eval/src:$PYTHONPATH python -m alpaca_eval.main evaluate \\
+                        --model_outputs {in_file} \\
+                        --annotators_config {judge_config_dir} \\
+                        --name "{model["id"]}"
+                      """
+                      os.system(cmd)
         if benchmarks.get("livebench"):
             print(f"[{model['id']}] Evaluating LiveBench...")
             output_dir = ROOT_DIR / "results" / model["id"] / "livebench"

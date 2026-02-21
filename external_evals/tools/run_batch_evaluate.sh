@@ -236,16 +236,35 @@ should_use_local_vllm_judge() {
 }
 
 benchmarks_need_llm_judge() {
+    # Check if any benchmark in the list needs an LLM judge
     IFS=',' read -ra BENCH_ARRAY <<< "$BENCHMARKS"
+    local needs_judge=false
     for bench in "${BENCH_ARRAY[@]}"; do
         bench="$(echo "$bench" | tr -d ' ')"
         case "$bench" in
             alpacaeval)
-                return 0
+                needs_judge=true
                 ;;
         esac
     done
-    return 1
+    $needs_judge || return 1
+
+    # If skip-existing is set, check whether all models already have alpacaeval results.
+    # If so, the judge is not actually needed this run.
+    if [ "$SKIP_EXISTING" = true ]; then
+        local model_ids
+        model_ids=$(get_model_ids "$MODEL_INPUT")
+        local any_needs_eval=false
+        for mid in $model_ids; do
+            if [ ! -f "$ROOT_DIR/external_evals/alpaca_eval/results/$mid/leaderboard.csv" ]; then
+                any_needs_eval=true
+                break
+            fi
+        done
+        $any_needs_eval || return 1
+    fi
+
+    return 0
 }
 
 stop_local_judge_vllm() {
@@ -361,13 +380,15 @@ check_existing_eval_results() {
 }
 
 # 生成 YAML 配置
+# 可选第三参数 bench_list 覆盖全局 BENCHMARKS
 generate_config() {
     local model_id=$1
     local config_file=$2
-    
+    local bench_list="${3:-$BENCHMARKS}"
+
     # 构建 benchmark 配置
     local bench_yaml=""
-    IFS=',' read -ra BENCH_ARRAY <<< "$BENCHMARKS"
+    IFS=',' read -ra BENCH_ARRAY <<< "$bench_list"
     for bench in "${BENCH_ARRAY[@]}"; do
         bench=$(echo "$bench" | tr -d ' ')
         bench_yaml="$bench_yaml  $bench: true\n"
@@ -390,67 +411,110 @@ $(echo -e "$bench_yaml")
 EOF
 }
 
-# 运行单个模型的评估
+# 运行单个模型的非 judge 类评估 (IFEval / TruthfulQA / LiveBench)
+# 参数: model_id  bench_list
 run_model_evaluate() {
     local model_id=$1
-    
+    local bench_list="$2"   # 必传，已去掉 alpacaeval
+
+    # 如果列表为空就不做任何事
+    [ -z "$bench_list" ] && return 0
+
     echo "=========================================================="
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] EVALUATION: $model_id"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] EVALUATE (no-judge): $model_id"
     echo "=========================================================="
-    
-    # 检查是否跳过
-    if [ "$SKIP_EXISTING" = true ] && check_existing_eval_results "$model_id"; then
-        echo "[INFO] 评估结果已存在，跳过: $model_id"
-        return 0
-    fi
-    
-    # 检查生成结果是否存在
-    local has_generate_results=false
-    IFS=',' read -ra BENCH_ARRAY <<< "$BENCHMARKS"
+
+    # 检查每个 benchmark 的生成结果 & skip-existing
+    local has_work=false
+    IFS=',' read -ra BENCH_ARRAY <<< "$bench_list"
     for bench in "${BENCH_ARRAY[@]}"; do
         bench=$(echo "$bench" | tr -d ' ')
         case $bench in
             ifeval)
-                [ -f "$RESULTS_DIR/$model_id/ifeval/candidate_outputs.jsonl" ] && has_generate_results=true
+                if [ "$SKIP_EXISTING" = true ] && \
+                   [ -f "$RESULTS_DIR/$model_id/ifeval/eval_results_strict.jsonl" ]; then
+                    echo "[INFO] [$model_id] IFEval 已存在，跳过"
+                elif [ -f "$RESULTS_DIR/$model_id/ifeval/candidate_outputs.jsonl" ]; then
+                    has_work=true
+                fi
                 ;;
             truthfulqa)
-                [ -f "$RESULTS_DIR/$model_id/truthfulqa/TruthfulQA_generated.csv" ] && has_generate_results=true
+                if [ "$SKIP_EXISTING" = true ] && \
+                   [ -f "$RESULTS_DIR/$model_id/truthfulqa/results.csv" ]; then
+                    echo "[INFO] [$model_id] TruthfulQA 已存在，跳过"
+                elif [ -f "$RESULTS_DIR/$model_id/truthfulqa/TruthfulQA_generated.csv" ]; then
+                    has_work=true
+                fi
                 ;;
-            alpacaeval)
-                [ -f "$RESULTS_DIR/$model_id/alpacaeval2/model_outputs.json" ] && has_generate_results=true
+            livebench)
+                if [ "$SKIP_EXISTING" = true ] && \
+                   [ "$(find "$RESULTS_DIR/$model_id/livebench" -name '*.jsonl' 2>/dev/null | wc -l)" -gt 0 ]; then
+                    echo "[INFO] [$model_id] LiveBench 已存在，跳过"
+                else
+                    has_work=true
+                fi
                 ;;
         esac
     done
-    
-    if [ "$has_generate_results" = false ]; then
-        echo "[WARN] 没有找到生成结果，跳过: $model_id"
+
+    if [ "$has_work" = false ]; then
+        echo "[INFO] [$model_id] no-judge 阶段无需执行，跳过"
         return 0
     fi
-    
-    # 生成配置
+
     local config_file="$TOOLS_DIR/config_eval_${model_id}.yaml"
-    generate_config "$model_id" "$config_file"
-    
-    # 运行评估
-    echo "[INFO] 开始评估 (Judge: $JUDGE_MODEL)..."
+    generate_config "$model_id" "$config_file" "$bench_list"
+
     local eval_args=("$config_file" --phase evaluate)
     [ "$SKIP_EXISTING" = true ] && eval_args+=(--skip-existing)
 
     if [ "$DRY_RUN" = true ]; then
         echo "[DRY-RUN] would run: python $TOOLS_DIR/run_evals.py ${eval_args[*]}"
-        echo "[INFO] ✓ dry-run 评估计划完成: $model_id"
     elif python "$TOOLS_DIR/run_evals.py" "${eval_args[@]}"; then
-        echo "[INFO] ✓ 评估完成: $model_id"
+        echo "[INFO] ✓ [$model_id] no-judge 评估完成"
     else
-        echo "[ERROR] ✗ 评估失败: $model_id"
+        echo "[ERROR] ✗ [$model_id] no-judge 评估失败"
     fi
-    
-    # 清理
+
     rm -f "$config_file"
-    
+
     echo "=========================================================="
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 完成: $model_id"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 完成 (no-judge): $model_id"
     echo "=========================================================="
+}
+
+# 运行单个模型的 AlpacaEval2 (需要 judge 已就绪)
+run_model_alpacaeval() {
+    local model_id=$1
+
+    local alpacaeval_out="$ROOT_DIR/external_evals/alpaca_eval/results/$model_id/leaderboard.csv"
+    if [ "$SKIP_EXISTING" = true ] && [ -f "$alpacaeval_out" ]; then
+        echo "[INFO] [$model_id] AlpacaEval2 已存在，跳过"
+        return 0
+    fi
+
+    if [ ! -f "$RESULTS_DIR/$model_id/alpacaeval2/model_outputs.json" ]; then
+        echo "[WARN] [$model_id] 未找到 AlpacaEval2 生成结果，跳过"
+        return 0
+    fi
+
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] AlpacaEval2: $model_id"
+
+    local config_file="$TOOLS_DIR/config_eval_alpaca_${model_id}.yaml"
+    generate_config "$model_id" "$config_file" "alpacaeval"
+
+    local eval_args=("$config_file" --phase evaluate)
+    [ "$SKIP_EXISTING" = true ] && eval_args+=(--skip-existing)
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY-RUN] would run alpacaeval: python $TOOLS_DIR/run_evals.py ${eval_args[*]}"
+    elif python "$TOOLS_DIR/run_evals.py" "${eval_args[@]}"; then
+        echo "[INFO] ✓ [$model_id] AlpacaEval2 完成"
+    else
+        echo "[ERROR] ✗ [$model_id] AlpacaEval2 失败"
+    fi
+
+    rm -f "$config_file"
 }
 
 # 获取模型 ID 列表
@@ -522,14 +586,6 @@ echo "  Skip Existing:  $SKIP_EXISTING"
 echo "  Dry Run:        $DRY_RUN"
 echo ""
 
-if benchmarks_need_llm_judge && should_use_local_vllm_judge; then
-    start_local_judge_vllm
-    trap 'stop_local_judge_vllm' EXIT
-    echo "[INFO] 使用本地 vLLM Judge: api_base=$JUDGE_API_BASE | model=$JUDGE_MODEL"
-elif should_use_local_vllm_judge; then
-    echo "[INFO] 本次 benchmarks 未包含需要 LLM judge 的项，将不启动 vLLM Judge"
-fi
-
 # 获取模型 ID 列表
 MODEL_IDS=$(get_model_ids "$MODEL_INPUT")
 
@@ -538,15 +594,58 @@ if [ -z "$MODEL_IDS" ]; then
     exit 1
 fi
 
-# 统计模型数量
 MODEL_COUNT=$(echo "$MODEL_IDS" | wc -l)
 echo "[INFO] 找到 $MODEL_COUNT 个模型"
 echo ""
 
-# 遍历评估
-for model_id in $MODEL_IDS; do
-    run_model_evaluate "$model_id"
-done
+# ---- 拆分 benchmark 列表 ----
+NO_JUDGE_BENCHES=$(echo "$BENCHMARKS" | tr ',' '\n' | grep -v '^alpacaeval$' | paste -sd ',' -)
+HAS_ALPACAEVAL=false
+echo "$BENCHMARKS" | tr ',' '\n' | grep -qx 'alpacaeval' && HAS_ALPACAEVAL=true
+
+# ==================== PHASE 1: 非 judge 类 benchmarks ====================
+if [ -n "$NO_JUDGE_BENCHES" ]; then
+    echo ""
+    echo "============================================================"
+    echo "  PHASE 1/2 — No-judge benchmarks: $NO_JUDGE_BENCHES"
+    echo "============================================================"
+    for model_id in $MODEL_IDS; do
+        run_model_evaluate "$model_id" "$NO_JUDGE_BENCHES"
+    done
+fi
+
+# ==================== PHASE 2: AlpacaEval (需要 judge) ====================
+if [ "$HAS_ALPACAEVAL" = true ]; then
+    # 检查是否有任何模型还需要跑 AlpacaEval
+    any_needs_alpacaeval=false
+    for model_id in $MODEL_IDS; do
+        if [ "$SKIP_EXISTING" = false ] || \
+           [ ! -f "$ROOT_DIR/external_evals/alpaca_eval/results/$model_id/leaderboard.csv" ]; then
+            if [ -f "$RESULTS_DIR/$model_id/alpacaeval2/model_outputs.json" ]; then
+                any_needs_alpacaeval=true
+                break
+            fi
+        fi
+    done
+
+    echo ""
+    echo "============================================================"
+    echo "  PHASE 2/2 — AlpacaEval2 (judge needed)"
+    echo "============================================================"
+
+    if [ "$any_needs_alpacaeval" = false ]; then
+        echo "[INFO] 所有模型的 AlpacaEval2 结果已存在，跳过 judge 启动"
+    else
+        if should_use_local_vllm_judge; then
+            start_local_judge_vllm
+            trap 'stop_local_judge_vllm' EXIT
+            echo "[INFO] 使用本地 vLLM Judge: api_base=$JUDGE_API_BASE | model=$JUDGE_MODEL"
+        fi
+        for model_id in $MODEL_IDS; do
+            run_model_alpacaeval "$model_id"
+        done
+    fi
+fi
 
 echo ""
 echo "============================================================"
