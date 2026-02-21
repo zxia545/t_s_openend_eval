@@ -457,8 +457,17 @@ add_model() {
 if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
     if [ -d "$MODEL_INPUT" ]; then
         mapfile -t subdirs < <(find "$MODEL_INPUT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort)
-        checkpoint_subdirs=()
+        visible_subdirs=()
         for model_path in "${subdirs[@]}"; do
+            child_name="$(basename "$model_path")"
+            if [[ "$child_name" == .* ]]; then
+                continue
+            fi
+            visible_subdirs+=("$model_path")
+        done
+
+        checkpoint_subdirs=()
+        for model_path in "${visible_subdirs[@]}"; do
             child_name="$(basename "$model_path")"
             if [[ "$child_name" == checkpoint* ]]; then
                 checkpoint_subdirs+=("$model_path")
@@ -471,9 +480,9 @@ if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9._-]+/[a-z
                 add_model "$model_path" "$(basename "$model_path")"
             done
             add_model "$MODEL_INPUT" "$(basename "$MODEL_INPUT")"
-        elif [ ${#subdirs[@]} -gt 0 ]; then
-            echo "[INFO] 检测到模型目录，共 ${#subdirs[@]} 个"
-            for model_path in "${subdirs[@]}"; do
+        elif [ ${#visible_subdirs[@]} -gt 0 ]; then
+            echo "[INFO] 检测到模型目录，共 ${#visible_subdirs[@]} 个"
+            for model_path in "${visible_subdirs[@]}"; do
                 add_model "$model_path" "$(basename "$model_path")"
             done
         else
