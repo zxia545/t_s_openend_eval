@@ -1,25 +1,55 @@
-# Common
-openai>=1.0.0
+# ==================== Common ====================
+openai>=1.5.0
 pyyaml
 pandas
-tqdm
+tqdm>=4.62.1
 requests
 urllib3
+numpy
+datasets>=2.20.0
 
-# AlpacaEval 2
+# ==================== AlpacaEval 2 ====================
 alpaca_eval>=0.3.1
-datasets
+tiktoken>=0.3.2
+fire
+scipy
+patsy
+scikit-learn
 
-# IFEval
+# ==================== IFEval ====================
 absl-py
 gin-config
 
-# TruthfulQA
+# ==================== TruthfulQA ====================
 bleurt @ git+https://github.com/google-research/bleurt.git
 nltk
 rouge_score
+evaluate
+t5
 
-# LiveBench
+# ==================== LiveBench ====================
+anthropic>=0.3
+httpx
+immutabledict
+langdetect
+levenshtein>=0.20.4
+sympy>=1.13
+shortuuid
+tenacity
+lark
+dataclasses_json
+jinja2
+tabulate
+typer
+platformdirs
+prompt_toolkit
+emoji
+syllapy
 pydantic
+pydantic_settings
+rich>=10.0.0
+rich-argparse
+litellm
 
+# ==================== vLLM ====================
 vllm
