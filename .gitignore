@@ -167,6 +167,7 @@ models/
 !external_evals/IFEval/instruction_following_eval/data/**
 !external_evals/TruthfulQA/data/
 !external_evals/TruthfulQA/data/**
+!external_evals/TruthfulQA/TruthfulQA.csv
 
 # Secrets and API Keys
 secrets.yaml
