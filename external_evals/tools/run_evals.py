@@ -115,7 +115,7 @@ def process_alpacaeval_generate(model, client):
         from datasets import load_dataset
 
         d = load_dataset(
-            "tatsu-lab/alpaca_eval", "alpaca_eval", split="eval", trust_remote_code=True
+            "tatsu-lab/alpaca_eval", "alpaca_eval", split="eval"
         )
     except Exception as e:
         print(f"Failed to load alpaca_eval dataset: {e}")
