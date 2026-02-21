@@ -92,7 +92,6 @@ NUM_WORKERS=0
 STAGGER_SECONDS=$DEFAULT_STAGGER_SECONDS
 PARALLEL_MODE="auto"
 DRY_RUN=false
-STAGGER_EXTRA_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -391,40 +390,32 @@ run_model_generate() {
     sleep 5
 }
 
-run_worker() {
-    local worker_idx=$1
-    local port=$2
-    local cuda_visible_devices=$3
-    local list_file=$4
-    local num_workers=$5
+launch_model_in_slot() {
+    local slot_idx=$1
+    local item=$2
+    local is_first_launch=$3
 
+    local model_path
+    local model_id
+    IFS=$'\t' read -r model_path model_id <<< "$item"
+
+    local slot_port="${SLOT_PORTS[$slot_idx]}"
+    local slot_cuda="${SLOT_CUDAS[$slot_idx]}"
     local delay=0
-    if [ "$STAGGER_SECONDS" -gt 0 ]; then
-        if [ "$STAGGER_EXTRA_ONLY" = true ]; then
-            if [ "$worker_idx" -ge "$GPU_COUNT" ]; then
-                local extra=$((worker_idx - GPU_COUNT + 1))
-                delay=$((extra * STAGGER_SECONDS))
-            fi
-        else
-            delay=$((worker_idx * STAGGER_SECONDS))
-        fi
-    fi
-    if [ "$delay" -gt 0 ]; then
-        echo "[INFO] worker=$worker_idx 将等待 $delay 秒后开始 (stagger)"
-        sleep "$delay"
+    if [ "$is_first_launch" = true ] && [ "$STAGGER_SECONDS" -gt 0 ]; then
+        delay=$((slot_idx * STAGGER_SECONDS))
     fi
 
-    local failed=0
-    while IFS=$'\t' read -r model_path model_id; do
-        if [ -z "$model_path" ] || [ -z "$model_id" ]; then
-            continue
+    echo "[INFO] 分配任务到 slot=$slot_idx | port=$slot_port | cuda=$slot_cuda | model=$model_id"
+    (
+        if [ "$delay" -gt 0 ]; then
+            echo "[INFO] slot=$slot_idx 将等待 $delay 秒后开始 (stagger)"
+            sleep "$delay"
         fi
-        if ! run_model_generate "$model_path" "$model_id" "$port" "$cuda_visible_devices" "$worker_idx"; then
-            failed=1
-        fi
-    done < <(awk -v w="$worker_idx" -v n="$num_workers" '((NR-1) % n) == w {print $0}' "$list_file")
-
-    return "$failed"
+        run_model_generate "$model_path" "$model_id" "$slot_port" "$slot_cuda" "$slot_idx"
+    ) &
+    local job_pid=$!
+    PID_TO_SLOT[$job_pid]="$slot_idx"
 }
 
 # ==================== 主逻辑 ====================
@@ -553,17 +544,7 @@ if [ "$NUM_WORKERS" -gt 0 ]; then
     WORKERS="$NUM_WORKERS"
 fi
 
-AUTO_OVERSUBSCRIBE=false
-if [ "$NUM_WORKERS" -eq 0 ] && [ "$PARALLEL_MODE" != "off" ] && [ "$TP_SIZE" -eq 1 ] && [ "$MODEL_COUNT" -eq $((GPU_COUNT + 1)) ]; then
-    WORKERS="$MODEL_COUNT"
-    AUTO_OVERSUBSCRIBE=true
-    if [ "$STAGGER_SECONDS" -eq "$DEFAULT_STAGGER_SECONDS" ]; then
-        STAGGER_SECONDS=90
-        STAGGER_EXTRA_ONLY=true
-    fi
-fi
-
-if [ "$TP_SIZE" -gt 1 ] && [ "$WORKERS" -gt "$MAX_WORKERS" ]; then
+if [ "$WORKERS" -gt "$MAX_WORKERS" ]; then
     WORKERS="$MAX_WORKERS"
 fi
 if [ "$WORKERS" -gt "$MODEL_COUNT" ]; then
@@ -574,12 +555,6 @@ if [ "$WORKERS" -lt 1 ]; then
 fi
 
 echo "[INFO] models=$MODEL_COUNT | gpus=$GPU_COUNT($(join_by , "${GPU_IDS[@]}") ) | tp=$TP_SIZE | workers=$WORKERS | base_port=$PORT | stagger=$STAGGER_SECONDS"
-if [ "$TP_SIZE" -eq 1 ] && [ "$WORKERS" -gt "$GPU_COUNT" ]; then
-    echo "[WARN] workers($WORKERS) > gpus($GPU_COUNT): 同一张 GPU 上会并发多个模型，可能 OOM；建议用 --stagger-seconds 错峰"
-fi
-if [ "$AUTO_OVERSUBSCRIBE" = true ]; then
-    echo "[INFO] auto-oversubscribe enabled (tp=1 且 models = gpus + 1)"
-fi
 
 if [ "$DRY_RUN" = true ]; then
     echo "[DRY-RUN] 调度计划:"
@@ -612,28 +587,54 @@ if [ "$WORKERS" -le 1 ]; then
         fi
     done
 else
-    tmp_list="$(mktemp)"
-    trap 'rm -f "$tmp_list"' EXIT
-    printf "%s\n" "${MODELS[@]}" > "$tmp_list"
-
-    pids=()
+    SLOT_CUDAS=()
+    SLOT_PORTS=()
     for ((w=0; w<WORKERS; w++)); do
         if [ "$TP_SIZE" -eq 1 ]; then
-            cuda_str="${GPU_IDS[$((w % GPU_COUNT))]}"
+            cuda_str="${GPU_IDS[$w]}"
         else
             start=$((w * TP_SIZE))
             gpu_slice=("${GPU_IDS[@]:$start:$TP_SIZE}")
             cuda_str="$(join_by , "${gpu_slice[@]}")"
         fi
         port=$((PORT + w))
-        echo "[INFO] 启动 worker=$w | port=$port | cuda=$cuda_str"
-        (run_worker "$w" "$port" "$cuda_str" "$tmp_list" "$WORKERS") &
-        pids+=("$!")
+        SLOT_CUDAS+=("$cuda_str")
+        SLOT_PORTS+=("$port")
+        echo "[INFO] 初始化 slot=$w | port=$port | cuda=$cuda_str"
     done
 
-    for pid in "${pids[@]}"; do
-        if ! wait "$pid"; then
+    pending_idx=0
+    declare -A PID_TO_SLOT=()
+
+    for ((slot=0; slot<WORKERS; slot++)); do
+        if [ "$pending_idx" -ge "$MODEL_COUNT" ]; then
+            break
+        fi
+        launch_model_in_slot "$slot" "${MODELS[$pending_idx]}" true
+        pending_idx=$((pending_idx + 1))
+    done
+
+    while [ ${#PID_TO_SLOT[@]} -gt 0 ]; do
+        finished_pid=""
+        if wait -n -p finished_pid; then
+            wait_rc=0
+        else
+            wait_rc=$?
+        fi
+
+        if [ -z "$finished_pid" ]; then
+            continue
+        fi
+        finished_slot="${PID_TO_SLOT[$finished_pid]}"
+        unset 'PID_TO_SLOT[$finished_pid]'
+
+        if [ "$wait_rc" -ne 0 ]; then
             EXIT_STATUS=1
+        fi
+
+        if [ "$pending_idx" -lt "$MODEL_COUNT" ]; then
+            launch_model_in_slot "$finished_slot" "${MODELS[$pending_idx]}" false
+            pending_idx=$((pending_idx + 1))
         fi
     done
 fi
