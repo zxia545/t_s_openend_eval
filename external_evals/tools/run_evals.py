@@ -4,23 +4,27 @@ import os
 import sys
 import json
 import csv
+import time
 import concurrent.futures
 from openai import OpenAI
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 
 # Load dataset for AlpacaEval
+load_dataset = None
 try:
     from datasets import load_dataset
 except ImportError:
     pass  # we might need it for alpacaeval
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_REQUEST_TIMEOUT = int(os.environ.get("EVAL_API_TIMEOUT", "180"))
+DEFAULT_API_MAX_RETRIES = int(os.environ.get("EVAL_API_MAX_RETRIES", "3"))
 
 
 def load_alpacaeval_eval_split():
     try:
-        if "load_dataset" in globals():
+        if load_dataset is not None:
             return list(
                 load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval", split="eval")
             )
@@ -55,18 +59,32 @@ def load_alpacaeval_eval_split():
     raise RuntimeError("Unsupported alpaca_eval.json format: expected JSON array")
 
 
-def call_openai_api(client, model_name, prompt, max_tokens=1024, temperature=0.0):
-    try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"API Error: {e}")
-        return ""
+def call_openai_api(
+    client,
+    model_name,
+    prompt,
+    max_tokens=1024,
+    temperature=0.0,
+    timeout=DEFAULT_REQUEST_TIMEOUT,
+    max_retries=DEFAULT_API_MAX_RETRIES,
+) -> str:
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                timeout=timeout,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            if attempt == max_retries:
+                print(f"API Error (attempt {attempt}/{max_retries}): {e}")
+                return ""
+            print(f"API Error (attempt {attempt}/{max_retries}), retrying: {e}")
+            time.sleep(min(2 ** (attempt - 1), 8))
+    return ""
 
 
 def process_ifeval_generate(model, client):
@@ -123,7 +141,7 @@ def process_truthfulqa_generate(model, client):
         response = call_openai_api(
             client, model["api_name"], full_prompt, max_tokens=50
         )
-        row[model["id"]] = response.strip()
+        row[model["id"]] = (response or "").strip()
         return row
 
     results = []
@@ -166,9 +184,14 @@ def process_alpacaeval_generate(model, client):
         }
 
     results = []
+    total = len(d)
+    print(f"[{model['id']}] AlpacaEval2 tasks: {total}")
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        for res in executor.map(_process, d):
-            results.append(res)
+        futures = [executor.submit(_process, item) for item in d]
+        for idx, fut in enumerate(concurrent.futures.as_completed(futures), start=1):
+            results.append(fut.result())
+            if idx % 20 == 0 or idx == total:
+                print(f"[{model['id']}] AlpacaEval2 progress: {idx}/{total}")
 
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
