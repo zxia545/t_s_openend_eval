@@ -218,7 +218,7 @@ detect_gpu_ids() {
 
 wait_for_server() {
     local port=$1
-    local timeout=180
+    local timeout=1000
     local elapsed=0
 
     while [ $elapsed -lt $timeout ]; do
