@@ -29,6 +29,40 @@ pip install -r external_evals/tools/requirements.txt
 
 # 方式 C: 只评估特定的 benchmarks
 ./external_evals/tools/run_batch_generate.sh Qwen/Qwen2.5-0.5B-Instruct --benchmarks ifeval,truthfulqa
+
+# 3. 收集分数到 JSONL
+python external_evals/tools/collect_scores.py
+```
+
+---
+
+## 🔀 多机并行运行
+
+支持多台机器同时运行不同模型的评估，结果不会互相覆盖：
+
+```bash
+# 机子 A
+./external_evals/tools/run_batch_generate.sh /path/to/model-A
+./external_evals/tools/run_batch_evaluate.sh model-A
+
+# 机子 B (同时运行)
+./external_evals/tools/run_batch_generate.sh /path/to/model-B
+./external_evals/tools/run_batch_evaluate.sh model-B
+```
+
+**结果存储**:
+```
+results/
+├── model-A/
+│   ├── ifeval/
+│   ├── truthfulqa/
+│   ├── alpacaeval2/
+│   └── livebench/
+├── model-B/
+│   └── ...
+└── summaries/
+    ├── model-A_scores.jsonl
+    └── model-B_scores.jsonl
 ```
 
 ---

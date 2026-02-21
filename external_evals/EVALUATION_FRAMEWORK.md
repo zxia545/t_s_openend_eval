@@ -234,44 +234,42 @@ custom_vllm_judge:
 ```
 输入数据:
 HuggingFace Dataset: livebench/livebench
-├── 多个领域: math, coding, reasoning, etc.
+├── 6 个领域: math, coding, reasoning, instruction_following, language, data_analysis
+├── 每个领域有多个 tasks
 ├── 从 HuggingFace 动态加载
 └── Release: 2024-11-25
 
 生成阶段 (gen_api_answer.py):
 1. 从 HuggingFace 加载问题
 2. 调用候选模型 API 生成回答
-3. 输出:
-   ├── model_answers/<model_id>/<category>.jsonl
-   └── 位置: livebench/livebench/model_answers/
+3. 临时存储: livebench/data/live_bench/*/model_answer/
+4. 自动同步到: results/<model_id>/livebench/<category>/<task>/model_answer.jsonl
 
 评估阶段 (gen_ground_truth_judgment.py):
 1. 读取模型回答
-2. Judge 模型评分 (1-10 分)
-3. 输出:
-   ├── model_judgment/<model_id>/<category>.jsonl
-   └── 位置: livebench/livebench/model_judgment/
+2. 使用 ground truth (规则) 评分 - 不需要 LLM Judge
+3. 临时存储: livebench/data/live_bench/*/model_judgment/
+4. 自动同步到: results/<model_id>/livebench/<category>/<task>/judgment.jsonl
 ```
 
-#### 生成文件格式 (model_answers/*.jsonl)
+**注意**: LiveBench 使用 ground truth（规则/答案）来评估，**不需要 LLM Judge**。
+
+#### 生成文件格式 (model_answer.jsonl)
 ```json
 {
   "question_id": "...",
-  "model": "Qwen2.5-0.5B-Instruct",
-  "answer": "...",
-  "category": "math"
+  "answer_id": "...",
+  "model": "qwen2.5-0.5b-instruct",
+  "choices": [{"index": 0, "turns": ["...answer..."]}]
 }
 ```
 
-#### 评估文件格式 (model_judgment/*.jsonl)
+#### 评估文件格式 (judgment.jsonl)
 ```json
 {
   "question_id": "...",
-  "model": "Qwen2.5-0.5B-Instruct",
-  "judgment": {
-    "score": 8,
-    "reasoning": "..."
-  }
+  "model": "qwen2.5-0.5b-instruct",
+  "score": 0.5
 }
 ```
 
@@ -286,11 +284,12 @@ HuggingFace Dataset: livebench/livebench
 | **生成** | IFEval | `IFEval/.../input_data.jsonl` | `results/<model>/ifeval/candidate_outputs.jsonl` |
 | **生成** | TruthfulQA | `TruthfulQA/TruthfulQA.csv` | `results/<model>/truthfulqa/TruthfulQA_generated.csv` |
 | **生成** | AlpacaEval2 | `HuggingFace: tatsu-lab/alpaca_eval` | `results/<model>/alpacaeval2/model_outputs.json` |
-| **生成** | LiveBench | `HuggingFace: livebench/livebench` | `livebench/livebench/model_answers/<model>/` |
+| **生成** | LiveBench | `HuggingFace: livebench/livebench` | `results/<model>/livebench/<category>/<task>/model_answer.jsonl` |
 | **评估** | IFEval | `results/<model>/ifeval/candidate_outputs.jsonl` | `results/<model>/ifeval/eval_results_*.jsonl` |
 | **评估** | TruthfulQA | `results/<model>/truthfulqa/TruthfulQA_generated.csv` | `results/<model>/truthfulqa/results.csv` |
-| **评估** | AlpacaEval2 | `results/<model>/alpacaeval2/model_outputs.json` | `alpaca_eval/results/<model>/` |
-| **评估** | LiveBench | `livebench/livebench/model_answers/<model>/` | `livebench/livebench/model_judgment/<model>/` |
+| **评估** | AlpacaEval2 | `results/<model>/alpacaeval2/model_outputs.json` | `results/<model>/alpacaeval2/annotations.json` |
+| **评估** | LiveBench | `results/<model>/livebench/*/model_answer.jsonl` | `results/<model>/livebench/*/judgment.jsonl` |
+| **汇总** | All | `results/<model>/*/` | `results/summaries/<model>_scores.jsonl` |
 
 ### 结果目录结构
 
@@ -306,21 +305,18 @@ external_evals/results/
     │   ├── TruthfulQA_generated.csv       # 生成结果
     │   └── results.csv                    # 评估结果
     │
-    └── alpacaeval2/
-        └── model_outputs.json             # 生成结果
+    ├── alpacaeval2/
+    │   ├── model_outputs.json             # 生成结果
+    │   ├── annotations.json               # 评估结果
+    │   └── leaderboard.csv                # 评估汇总
+    │
+    └── livebench/
+        └── <category>/<task>/
+            ├── model_answer.jsonl         # 生成结果
+            └── judgment.jsonl             # 评估结果
 
-external_evals/alpaca_eval/results/
-└── <model_id>/
-    ├── annotations.json                   # 评估结果 (详细)
-    └── leaderboard.csv                    # 评估结果 (汇总)
-
-external_evals/livebench/livebench/
-├── model_answers/
-│   └── <model_id>/
-│       └── <category>.jsonl               # 生成结果
-└── model_judgment/
-    └── <model_id>/
-        └── <category>.jsonl               # 评估结果
+external_evals/results/summaries/
+└── <model_id>_scores.jsonl                # 所有评估的分数汇总
 ```
 
 ---

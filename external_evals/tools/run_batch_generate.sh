@@ -32,6 +32,7 @@ DEFAULT_PORT=8001
 DEFAULT_GPU_MEM=0.85
 DEFAULT_TP_SIZE=1
 DEFAULT_BENCHMARKS="ifeval,truthfulqa,alpacaeval,livebench"
+DEFAULT_VLLM_CONDA_ENV="vllm"
 
 # ==================== 帮助信息 ====================
 show_help() {
@@ -136,8 +137,8 @@ TOOLS_DIR="$ROOT_DIR/external_evals/tools"
 RESULTS_DIR="$ROOT_DIR/external_evals/results"
 
 # 激活 conda 环境
-source /root/miniconda3/etc/profile.d/conda.sh 2>/dev/null || true
-conda activate learnarena 2>/dev/null || true
+source activate vllm
+conda activate vllm
 
 # ==================== 辅助函数 ====================
 

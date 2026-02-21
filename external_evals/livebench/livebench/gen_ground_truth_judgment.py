@@ -734,6 +734,12 @@ if __name__ == "__main__":
     parser.add_argument("--answer-file", type=str, default=None)
     parser.add_argument("--output-file", type=str, default=None)
     parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="If provided, judgment files will be written to {output_dir}/{category}/{task}/judgment.jsonl instead of data/",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         default=False,
@@ -798,11 +804,18 @@ if __name__ == "__main__":
                     task_full_name = (
                         f"{LIVE_BENCH_DATA_SUPER_PATH}/{category_name}/{task_name}"
                     )
-                    output_file = (
-                        f"data/{task_full_name}/model_judgment/ground_truth_judgment.jsonl"
-                        if args.output_file is None
-                        else args.output_file
-                    )
+                    if args.output_file is not None:
+                        output_file = args.output_file
+                    elif args.output_dir is not None:
+                        os.makedirs(
+                            f"{args.output_dir}/{category_name}/{task_name}",
+                            exist_ok=True,
+                        )
+                        output_file = f"{args.output_dir}/{category_name}/{task_name}/judgment.jsonl"
+                    elif model_list and len(model_list) == 1:
+                        output_file = f"data/{task_full_name}/model_judgment/{model_list[0]}_judgment.jsonl"
+                    else:
+                        output_file = f"data/{task_full_name}/model_judgment/ground_truth_judgment.jsonl"
                     answer_dir = (
                         f"data/{task_full_name}/model_answer/"
                         if args.answer_file is None
@@ -853,11 +866,20 @@ if __name__ == "__main__":
                     ]
                 bench_name = os.path.dirname(question_file).replace("data/", "")
 
-                output_file = (
-                    f"data/{bench_name}/model_judgment/ground_truth_judgment.jsonl"
-                    if args.output_file is None
-                    else args.output_file
-                )
+                if args.output_file is not None:
+                    output_file = args.output_file
+                elif args.output_dir is not None:
+                    parts = bench_name.split("/")
+                    category = parts[1] if len(parts) > 1 else parts[0]
+                    task = parts[2] if len(parts) > 2 else "default"
+                    os.makedirs(f"{args.output_dir}/{category}/{task}", exist_ok=True)
+                    output_file = f"{args.output_dir}/{category}/{task}/judgment.jsonl"
+                elif model_list and len(model_list) == 1:
+                    output_file = f"data/{bench_name}/model_judgment/{model_list[0]}_judgment.jsonl"
+                else:
+                    output_file = (
+                        f"data/{bench_name}/model_judgment/ground_truth_judgment.jsonl"
+                    )
                 answer_dir = (
                     f"data/{bench_name}/model_answer/"
                     if args.answer_file is None

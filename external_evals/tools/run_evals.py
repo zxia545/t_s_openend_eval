@@ -230,7 +230,14 @@ def run_evaluate(config):
                 / "model_outputs.json"
             )
             if in_file.exists():
-                config_yaml = ROOT_DIR / "results" / "judge_openai_config.yaml"
+                config_yaml = (
+                    ROOT_DIR
+                    / "results"
+                    / model["id"]
+                    / "alpacaeval2"
+                    / "judge_config.yaml"
+                )
+                config_yaml.parent.mkdir(parents=True, exist_ok=True)
                 with open(config_yaml, "w") as f:
                     yaml.dump(
                         {
@@ -247,12 +254,7 @@ def run_evaluate(config):
                 os.environ["OPENAI_CLIENT_CONFIG_PATH"] = str(config_yaml)
 
                 judge_config_dir = (
-                    ROOT_DIR
-                    / "alpaca_eval"
-                    / "src"
-                    / "alpaca_eval"
-                    / "evaluators_configs"
-                    / "custom_vllm_judge"
+                    ROOT_DIR / "results" / model["id"] / "alpacaeval2" / "judge_config"
                 )
                 judge_config_dir.mkdir(parents=True, exist_ok=True)
                 with open(judge_config_dir / "configs.yaml", "w") as f:
@@ -337,6 +339,8 @@ def run_evaluate(config):
 
         if benchmarks.get("livebench"):
             print(f"[{model['id']}] Evaluating LiveBench...")
+            output_dir = ROOT_DIR / "results" / model["id"] / "livebench"
+            output_dir.mkdir(parents=True, exist_ok=True)
             cmd = f"""
             cd {ROOT_DIR}/livebench/livebench && \\
             python gen_ground_truth_judgment.py \\
@@ -345,6 +349,7 @@ def run_evaluate(config):
               --model-display-name "{model["id"]}" \\
               --question-source huggingface \\
               --livebench-release-option "2024-11-25" \\
+              --output-dir "{output_dir}" \\
               --parallel 8 \\
               --resume \\
               --ignore-missing-answers
