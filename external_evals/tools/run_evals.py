@@ -327,7 +327,7 @@ def run_evaluate(config, skip_existing=False):
                     yaml.dump(
                         {
                             "custom_vllm_judge": {
-                                "prompt_template": "alpaca_eval_gpt4_turbo_fn/alpaca_eval_fn.txt",
+                                "prompt_template": str(ROOT_DIR / "alpaca_eval" / "src" / "alpaca_eval" / "evaluators_configs" / "alpaca_eval_gpt4_turbo_fn" / "alpaca_eval_fn.txt"),
                                 "fn_completions": "openai_completions",
                                 "completions_kwargs": {
                                     "model_name": judge_model,

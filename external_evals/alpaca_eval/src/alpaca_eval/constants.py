@@ -95,6 +95,7 @@ def get_alpaca_eval_data(dataset="alpaca_eval_gpt4_baseline"):
             token=DATASETS_TOKEN,
             download_mode="force_redownload" if DATASETS_FORCE_DOWNLOAD else None,
             split="eval",
+            trust_remote_code=True,
         )
         return dataset_obj
     except Exception as e:
