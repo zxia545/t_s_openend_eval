@@ -6,7 +6,7 @@ tqdm>=4.62.1
 requests
 urllib3
 numpy
-datasets>=4.5.0
+datasets==3.6.0
 
 # ==================== AlpacaEval 2 ====================
 -e ../alpaca_eval

@@ -227,7 +227,7 @@ def run_generate(config):
             os.system(cmd)
 
 
-def run_evaluate(config):
+def run_evaluate(config, skip_existing=False):
     judge_conf = config.get("judge", {})
     judge_api_base = judge_conf.get("api_base")
     judge_model = judge_conf.get("model_name")
@@ -238,16 +238,6 @@ def run_evaluate(config):
 
         if benchmarks.get("ifeval"):
             print(f"[{model['id']}] Evaluating IFEval...")
-            import subprocess
-
-            subprocess.run(
-                [
-                    "python",
-                    "-c",
-                    "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)",
-                ],
-                check=False,
-            )
             in_file = (
                 ROOT_DIR
                 / "results"
@@ -256,9 +246,13 @@ def run_evaluate(config):
                 / "candidate_outputs.jsonl"
             )
             out_dir = ROOT_DIR / "results" / model["id"] / "ifeval"
-            if in_file.exists():
+            out_file = out_dir / "eval_results_strict.jsonl"
+            if skip_existing and out_file.exists():
+                print(f"[{model['id']}] IFEval eval already exists. Skipping.")
+            elif in_file.exists():
                 cmd = f"""
                 cd {ROOT_DIR}/IFEval && \\
+                CUDA_VISIBLE_DEVICES="" PYTHONPATH={ROOT_DIR}/IFEval python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)" && \\
                 CUDA_VISIBLE_DEVICES="" PYTHONPATH={ROOT_DIR}/IFEval python -m instruction_following_eval.evaluation_main \\
                   --input_data=instruction_following_eval/data/input_data.jsonl \\
                   --input_response_data={in_file} \\
@@ -276,7 +270,9 @@ def run_evaluate(config):
                 / "TruthfulQA_generated.csv"
             )
             out_path = ROOT_DIR / "results" / model["id"] / "truthfulqa" / "results.csv"
-            if in_file.exists():
+            if skip_existing and out_path.exists():
+                print(f"[{model['id']}] TruthfulQA eval already exists. Skipping.")
+            elif in_file.exists():
                 cmd = f"""
                 cd {ROOT_DIR}/TruthfulQA && \\
                 CUDA_VISIBLE_DEVICES="" python -m truthfulqa.evaluate \\
@@ -296,7 +292,10 @@ def run_evaluate(config):
                 / "alpacaeval2"
                 / "model_outputs.json"
             )
-            if in_file.exists():
+            alpacaeval_out = ROOT_DIR / "alpaca_eval" / "results" / model["id"] / "leaderboard.csv"
+            if skip_existing and alpacaeval_out.exists():
+                print(f"[{model['id']}] AlpacaEval2 eval already exists. Skipping.")
+            elif in_file.exists():
                 config_yaml = (
                     ROOT_DIR
                     / "results"
@@ -408,7 +407,11 @@ def run_evaluate(config):
             print(f"[{model['id']}] Evaluating LiveBench...")
             output_dir = ROOT_DIR / "results" / model["id"] / "livebench"
             output_dir.mkdir(parents=True, exist_ok=True)
-            cmd = f"""
+            livebench_done = list(output_dir.glob("**/*.jsonl")) if output_dir.exists() else []
+            if skip_existing and livebench_done:
+                print(f"[{model['id']}] LiveBench eval already exists ({len(livebench_done)} judgment files). Skipping.")
+            else:
+             cmd = f"""
             cd {ROOT_DIR}/livebench/livebench && \\
             CUDA_VISIBLE_DEVICES="" python gen_ground_truth_judgment.py \\
               --bench-name live_bench \\
@@ -420,8 +423,8 @@ def run_evaluate(config):
               --parallel 8 \\
               --resume \\
               --ignore-missing-answers
-            """
-            os.system(cmd)
+             """
+             os.system(cmd)
 
 
 if __name__ == "__main__":
@@ -433,6 +436,11 @@ if __name__ == "__main__":
         default="all",
         help="Phase to run",
     )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip benchmarks whose evaluation output already exists",
+    )
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
@@ -442,4 +450,4 @@ if __name__ == "__main__":
         run_generate(config)
 
     if args.phase in ["evaluate", "all"]:
-        run_evaluate(config)
+        run_evaluate(config, skip_existing=args.skip_existing)

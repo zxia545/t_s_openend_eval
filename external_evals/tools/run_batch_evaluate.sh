@@ -433,10 +433,13 @@ run_model_evaluate() {
     
     # 运行评估
     echo "[INFO] 开始评估 (Judge: $JUDGE_MODEL)..."
+    local eval_args=("$config_file" --phase evaluate)
+    [ "$SKIP_EXISTING" = true ] && eval_args+=(--skip-existing)
+
     if [ "$DRY_RUN" = true ]; then
-        echo "[DRY-RUN] would run: python $TOOLS_DIR/run_evals.py $config_file --phase evaluate"
+        echo "[DRY-RUN] would run: python $TOOLS_DIR/run_evals.py ${eval_args[*]}"
         echo "[INFO] ✓ dry-run 评估计划完成: $model_id"
-    elif python "$TOOLS_DIR/run_evals.py" "$config_file" --phase evaluate; then
+    elif python "$TOOLS_DIR/run_evals.py" "${eval_args[@]}"; then
         echo "[INFO] ✓ 评估完成: $model_id"
     else
         echo "[ERROR] ✗ 评估失败: $model_id"
