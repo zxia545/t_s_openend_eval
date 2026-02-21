@@ -33,6 +33,7 @@ DEFAULT_GPU_MEM=0.85
 DEFAULT_TP_SIZE=1
 DEFAULT_BENCHMARKS="ifeval,truthfulqa,alpacaeval,livebench"
 DEFAULT_VLLM_CONDA_ENV="vllm"
+DEFAULT_STAGGER_SECONDS=0
 
 # ==================== 帮助信息 ====================
 show_help() {
@@ -53,7 +54,12 @@ Flexible Batch Generation Script for LLM Evaluation
     -g, --gpu-mem UTIL   GPU 内存使用率 (默认: $DEFAULT_GPU_MEM)
     -t, --tp-size SIZE   Tensor Parallel 大小 (默认: $DEFAULT_TP_SIZE)
     -b, --benchmarks LIST  要运行的 benchmarks (逗号分隔)
-                         (默认: $DEFAULT_BENCHMARKS)
+                          (默认: $DEFAULT_BENCHMARKS)
+    --gpus LIST          使用指定 GPU (逗号分隔，如 0,1,2,3；默认: 自动探测)
+    --num-workers N      并行 worker 数量 (默认: 自动 = floor(num_gpus / tp_size))
+    --stagger-seconds S  每个 worker 启动前错峰等待秒数 (默认: $DEFAULT_STAGGER_SECONDS)
+    --no-parallel        强制串行 (默认: 自动并行)
+    --dry-run            只打印调度计划，不实际启动 vLLM/跑生成
     --skip-existing      跳过已有结果的模型
     -h, --help           显示此帮助信息
 
@@ -80,6 +86,12 @@ GPU_MEM=$DEFAULT_GPU_MEM
 TP_SIZE=$DEFAULT_TP_SIZE
 BENCHMARKS=$DEFAULT_BENCHMARKS
 SKIP_EXISTING=false
+GPU_IDS_CSV=""
+NUM_WORKERS=0
+STAGGER_SECONDS=$DEFAULT_STAGGER_SECONDS
+PARALLEL_MODE="auto"
+DRY_RUN=false
+STAGGER_EXTRA_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -98,6 +110,26 @@ while [[ $# -gt 0 ]]; do
         -b|--benchmarks)
             BENCHMARKS="$2"
             shift 2
+            ;;
+        --gpus)
+            GPU_IDS_CSV="$2"
+            shift 2
+            ;;
+        --num-workers)
+            NUM_WORKERS="$2"
+            shift 2
+            ;;
+        --stagger-seconds)
+            STAGGER_SECONDS="$2"
+            shift 2
+            ;;
+        --no-parallel)
+            PARALLEL_MODE="off"
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
             ;;
         --skip-existing)
             SKIP_EXISTING=true
@@ -136,11 +168,67 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TOOLS_DIR="$ROOT_DIR/external_evals/tools"
 RESULTS_DIR="$ROOT_DIR/external_evals/results"
 
-# 激活 conda 环境
-source activate vllm
-conda activate vllm
+if command -v conda >/dev/null 2>&1; then
+    source "$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh" 2>/dev/null || true
+    conda activate "$DEFAULT_VLLM_CONDA_ENV" || {
+        echo "[ERROR] conda env 激活失败: $DEFAULT_VLLM_CONDA_ENV"
+        exit 1
+    }
+else
+    source activate "$DEFAULT_VLLM_CONDA_ENV" 2>/dev/null || true
+fi
 
 # ==================== 辅助函数 ====================
+
+join_by() {
+    local IFS="$1"
+    shift
+    echo "$*"
+}
+
+sanitize_for_filename() {
+    echo "$1" | tr '/: ' '___'
+}
+
+split_csv_to_array() {
+    local csv="$1"
+    local -n out_arr="$2"
+
+    out_arr=()
+    if [ -z "$csv" ]; then
+        return 0
+    fi
+    IFS=',' read -ra out_arr <<< "$csv"
+    for i in "${!out_arr[@]}"; do
+        out_arr[$i]="$(echo "${out_arr[$i]}" | tr -d ' ' )"
+    done
+}
+
+detect_gpu_ids() {
+    local out_name="$1"
+    local -n out_arr="$out_name"
+
+    if [ -n "$GPU_IDS_CSV" ]; then
+        split_csv_to_array "$GPU_IDS_CSV" "$out_name"
+        return 0
+    fi
+
+    if [ -n "${CUDA_VISIBLE_DEVICES-}" ]; then
+        split_csv_to_array "$CUDA_VISIBLE_DEVICES" "$out_name"
+        if [ ${#out_arr[@]} -gt 0 ] && [ -n "${out_arr[0]}" ]; then
+            return 0
+        fi
+    fi
+
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        mapfile -t out_arr < <(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | tr -d ' ')
+        if [ ${#out_arr[@]} -gt 0 ]; then
+            return 0
+        fi
+    fi
+
+    out_arr=("0")
+}
 
 # 等待 vLLM 服务就绪
 wait_for_server() {
@@ -221,9 +309,19 @@ EOF
 run_model_generate() {
     local model_path=$1
     local model_id=$2
+    local port=$3
+    local cuda_visible_devices=$4
+    local worker_label=${5:-""}
+
+    local log_model_id
+    log_model_id="$(sanitize_for_filename "$model_id")"
     
     echo "=========================================================="
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] GENERATION: $model_id"
+    if [ -n "$worker_label" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] GENERATION: $model_id | worker=$worker_label | port=$port | cuda=$cuda_visible_devices"
+    else
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] GENERATION: $model_id | port=$port | cuda=$cuda_visible_devices"
+    fi
     echo "=========================================================="
     
     # 检查是否跳过
@@ -233,29 +331,36 @@ run_model_generate() {
     fi
     
     # 启动 vLLM 服务
-    echo "[INFO] 启动 vLLM 服务 (端口: $PORT, GPU: $GPU_MEM, TP: $TP_SIZE)..."
-    python -m vllm.entrypoints.openai.api_server \
+    echo "[INFO] 启动 vLLM 服务 (端口: $port, GPU_MEM: $GPU_MEM, TP: $TP_SIZE, CUDA_VISIBLE_DEVICES: $cuda_visible_devices)..."
+    local vllm_log="$TOOLS_DIR/vllm_${log_model_id}_p${port}.log"
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY-RUN] would start vLLM -> $vllm_log"
+        echo "[DRY-RUN] would run evals via port $port"
+        return 0
+    fi
+
+    CUDA_VISIBLE_DEVICES="$cuda_visible_devices" python -m vllm.entrypoints.openai.api_server \
         --model "$model_path" \
         --served-model-name "$model_id" \
-        --port "$PORT" \
+        --port "$port" \
         --gpu-memory-utilization "$GPU_MEM" \
         --tensor-parallel-size "$TP_SIZE" \
         --trust-remote-code \
-        > "$TOOLS_DIR/vllm_${model_id}.log" 2>&1 &
+        > "$vllm_log" 2>&1 &
         
     local vllm_pid=$!
-    echo "[INFO] vLLM PID: $vllm_pid | 日志: $TOOLS_DIR/vllm_${model_id}.log"
+    echo "[INFO] vLLM PID: $vllm_pid | 日志: $vllm_log"
     
     # 等待服务就绪
-    if ! wait_for_server "$PORT"; then
+    if ! wait_for_server "$port"; then
         echo "[ERROR] vLLM 启动失败: $model_id"
         kill -9 $vllm_pid 2>/dev/null || true
         return 1
     fi
     
     # 生成配置
-    local config_file="$TOOLS_DIR/config_${model_id}.yaml"
-    generate_config "$model_id" "http://localhost:${PORT}/v1" "$config_file"
+    local config_file="$TOOLS_DIR/config_${log_model_id}_p${port}.yaml"
+    generate_config "$model_id" "http://localhost:${port}/v1" "$config_file"
     
     # 运行生成
     echo "[INFO] 开始生成..."
@@ -263,6 +368,11 @@ run_model_generate() {
         echo "[INFO] ✓ 生成完成: $model_id"
     else
         echo "[ERROR] ✗ 生成失败: $model_id"
+        echo "[INFO] 停止 vLLM 服务..."
+        kill $vllm_pid 2>/dev/null || true
+        wait $vllm_pid 2>/dev/null || true
+        rm -f "$config_file"
+        return 1
     fi
     
     # 停止服务
@@ -280,6 +390,42 @@ run_model_generate() {
     sleep 5
 }
 
+run_worker() {
+    local worker_idx=$1
+    local port=$2
+    local cuda_visible_devices=$3
+    local list_file=$4
+    local num_workers=$5
+
+    local delay=0
+    if [ "$STAGGER_SECONDS" -gt 0 ]; then
+        if [ "$STAGGER_EXTRA_ONLY" = true ]; then
+            if [ "$worker_idx" -ge "$GPU_COUNT" ]; then
+                local extra=$((worker_idx - GPU_COUNT + 1))
+                delay=$((extra * STAGGER_SECONDS))
+            fi
+        else
+            delay=$((worker_idx * STAGGER_SECONDS))
+        fi
+    fi
+    if [ "$delay" -gt 0 ]; then
+        echo "[INFO] worker=$worker_idx 将等待 $delay 秒后开始 (stagger)"
+        sleep "$delay"
+    fi
+
+    local failed=0
+    while IFS=$'\t' read -r model_path model_id; do
+        if [ -z "$model_path" ] || [ -z "$model_id" ]; then
+            continue
+        fi
+        if ! run_model_generate "$model_path" "$model_id" "$port" "$cuda_visible_devices" "$worker_idx"; then
+            failed=1
+        fi
+    done < <(awk -v w="$worker_idx" -v n="$num_workers" '((NR-1) % n) == w {print $0}' "$list_file")
+
+    return "$failed"
+}
+
 # ==================== 主逻辑 ====================
 
 echo "============================================================"
@@ -293,25 +439,31 @@ echo "  GPU Memory:     $GPU_MEM"
 echo "  TP Size:        $TP_SIZE"
 echo "  Benchmarks:     $BENCHMARKS"
 echo "  Skip Existing:  $SKIP_EXISTING"
+echo "  GPUs:           ${GPU_IDS_CSV:-auto}"
+echo "  Workers:        ${NUM_WORKERS:-auto}"
+echo "  Stagger(s):     $STAGGER_SECONDS"
+echo "  Parallel:       $PARALLEL_MODE"
+echo "  Dry Run:        $DRY_RUN"
 echo ""
 
-# 判断输入类型
-if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$ ]]; then
+MODELS=()
+add_model() {
+    local model_path=$1
+    local model_id=$2
+    MODELS+=("$model_path"$'\t'"$model_id")
+}
+
+if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
     # 本地路径
     if [ -d "$MODEL_INPUT" ]; then
-        # 检查是否是 checkpoints 文件夹 (包含子目录)
-        local subdirs=($(find "$MODEL_INPUT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null))
+        mapfile -t subdirs < <(find "$MODEL_INPUT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort)
         if [ ${#subdirs[@]} -gt 0 ]; then
-            # 多个 checkpoint
             echo "[INFO] 检测到 checkpoints 文件夹，共 ${#subdirs[@]} 个模型"
             for model_path in "${subdirs[@]}"; do
-                model_id=$(basename "$model_path")
-                run_model_generate "$model_path" "$model_id"
+                add_model "$model_path" "$(basename "$model_path")"
             done
         else
-            # 单个模型
-            model_id=$(basename "$MODEL_INPUT")
-            run_model_generate "$MODEL_INPUT" "$model_id"
+            add_model "$MODEL_INPUT" "$(basename "$MODEL_INPUT")"
         fi
     else
         echo "[ERROR] 路径不存在: $MODEL_INPUT"
@@ -319,8 +471,154 @@ if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9_-]+/[a-zA
     fi
 else
     # HuggingFace 模型 ID 或单个名称
-    model_id=$(basename "$MODEL_INPUT")
-    run_model_generate "$MODEL_INPUT" "$model_id"
+    add_model "$MODEL_INPUT" "$(basename "$MODEL_INPUT")"
+fi
+
+MODEL_COUNT=${#MODELS[@]}
+if [ "$MODEL_COUNT" -eq 0 ]; then
+    echo "[ERROR] 未找到任何模型"
+    exit 1
+fi
+
+GPU_IDS=()
+detect_gpu_ids GPU_IDS
+VALID_GPU_IDS=()
+for gid in "${GPU_IDS[@]}"; do
+    if [ -z "$gid" ]; then
+        continue
+    fi
+    if [[ "$gid" =~ ^[0-9]+$ ]]; then
+        VALID_GPU_IDS+=("$gid")
+    else
+        echo "[ERROR] 非法 GPU id: '$gid' (期望整数，如 0,1,2)"
+        exit 1
+    fi
+done
+if [ ${#VALID_GPU_IDS[@]} -eq 0 ]; then
+    VALID_GPU_IDS=("0")
+fi
+GPU_IDS=("${VALID_GPU_IDS[@]}")
+GPU_COUNT=${#GPU_IDS[@]}
+
+if ! [[ "$NUM_WORKERS" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] --num-workers 必须是非负整数: $NUM_WORKERS"
+    exit 1
+fi
+if ! [[ "$STAGGER_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] --stagger-seconds 必须是非负整数: $STAGGER_SECONDS"
+    exit 1
+fi
+
+if ! [[ "$TP_SIZE" =~ ^[0-9]+$ ]] || [ "$TP_SIZE" -le 0 ]; then
+    echo "[ERROR] --tp-size 必须是正整数: $TP_SIZE"
+    exit 1
+fi
+if [ "$TP_SIZE" -gt "$GPU_COUNT" ]; then
+    echo "[ERROR] TP_SIZE($TP_SIZE) > 可用 GPU 数($GPU_COUNT)。可用 GPU: $(join_by , "${GPU_IDS[@]}")"
+    exit 1
+fi
+
+MAX_WORKERS=$((GPU_COUNT / TP_SIZE))
+if [ "$MAX_WORKERS" -lt 1 ]; then
+    MAX_WORKERS=1
+fi
+
+WORKERS=1
+if [ "$PARALLEL_MODE" != "off" ] && [ "$MODEL_COUNT" -gt 1 ] && [ "$MAX_WORKERS" -gt 1 ]; then
+    WORKERS="$MAX_WORKERS"
+fi
+if [ "$NUM_WORKERS" -gt 0 ]; then
+    WORKERS="$NUM_WORKERS"
+fi
+
+AUTO_OVERSUBSCRIBE=false
+if [ "$NUM_WORKERS" -eq 0 ] && [ "$PARALLEL_MODE" != "off" ] && [ "$TP_SIZE" -eq 1 ] && [ "$MODEL_COUNT" -eq $((GPU_COUNT + 1)) ]; then
+    WORKERS="$MODEL_COUNT"
+    AUTO_OVERSUBSCRIBE=true
+    if [ "$STAGGER_SECONDS" -eq "$DEFAULT_STAGGER_SECONDS" ]; then
+        STAGGER_SECONDS=90
+        STAGGER_EXTRA_ONLY=true
+    fi
+fi
+
+if [ "$TP_SIZE" -gt 1 ] && [ "$WORKERS" -gt "$MAX_WORKERS" ]; then
+    WORKERS="$MAX_WORKERS"
+fi
+if [ "$WORKERS" -gt "$MODEL_COUNT" ]; then
+    WORKERS="$MODEL_COUNT"
+fi
+if [ "$WORKERS" -lt 1 ]; then
+    WORKERS=1
+fi
+
+echo "[INFO] models=$MODEL_COUNT | gpus=$GPU_COUNT($(join_by , "${GPU_IDS[@]}") ) | tp=$TP_SIZE | workers=$WORKERS | base_port=$PORT | stagger=$STAGGER_SECONDS"
+if [ "$TP_SIZE" -eq 1 ] && [ "$WORKERS" -gt "$GPU_COUNT" ]; then
+    echo "[WARN] workers($WORKERS) > gpus($GPU_COUNT): 同一张 GPU 上会并发多个模型，可能 OOM；建议用 --stagger-seconds 错峰"
+fi
+if [ "$AUTO_OVERSUBSCRIBE" = true ]; then
+    echo "[INFO] auto-oversubscribe enabled (tp=1 且 models = gpus + 1)"
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    echo "[DRY-RUN] 调度计划:"
+    for ((w=0; w<WORKERS; w++)); do
+        if [ "$TP_SIZE" -eq 1 ]; then
+            cuda_str="${GPU_IDS[$((w % GPU_COUNT))]}"
+        else
+            start=$((w * TP_SIZE))
+            gpu_slice=("${GPU_IDS[@]:$start:$TP_SIZE}")
+            cuda_str="$(join_by , "${gpu_slice[@]}")"
+        fi
+        echo "  worker=$w port=$((PORT + w)) cuda=$cuda_str"
+    done
+    echo "[DRY-RUN] 模型列表:"
+    for i in "${!MODELS[@]}"; do
+        IFS=$'\t' read -r mp mid <<< "${MODELS[$i]}"
+        echo "  [$i] $mid -> $mp"
+    done
+    exit 0
+fi
+
+EXIT_STATUS=0
+
+if [ "$WORKERS" -le 1 ]; then
+    cuda_str="$(join_by , "${GPU_IDS[@]:0:$TP_SIZE}")"
+    for item in "${MODELS[@]}"; do
+        IFS=$'\t' read -r model_path model_id <<< "$item"
+        if ! run_model_generate "$model_path" "$model_id" "$PORT" "$cuda_str"; then
+            EXIT_STATUS=1
+        fi
+    done
+else
+    tmp_list="$(mktemp)"
+    trap 'rm -f "$tmp_list"' EXIT
+    printf "%s\n" "${MODELS[@]}" > "$tmp_list"
+
+    pids=()
+    for ((w=0; w<WORKERS; w++)); do
+        if [ "$TP_SIZE" -eq 1 ]; then
+            cuda_str="${GPU_IDS[$((w % GPU_COUNT))]}"
+        else
+            start=$((w * TP_SIZE))
+            gpu_slice=("${GPU_IDS[@]:$start:$TP_SIZE}")
+            cuda_str="$(join_by , "${gpu_slice[@]}")"
+        fi
+        port=$((PORT + w))
+        echo "[INFO] 启动 worker=$w | port=$port | cuda=$cuda_str"
+        (run_worker "$w" "$port" "$cuda_str" "$tmp_list" "$WORKERS") &
+        pids+=("$!")
+    done
+
+    for pid in "${pids[@]}"; do
+        if ! wait "$pid"; then
+            EXIT_STATUS=1
+        fi
+    done
+fi
+
+if [ "$EXIT_STATUS" -ne 0 ]; then
+    echo "[ERROR] 部分模型生成失败 (exit=$EXIT_STATUS)"
+    exit "$EXIT_STATUS"
 fi
 
 echo ""
