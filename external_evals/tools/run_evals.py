@@ -7,6 +7,7 @@ import csv
 import concurrent.futures
 from openai import OpenAI
 from pathlib import Path
+from huggingface_hub import hf_hub_download
 
 # Load dataset for AlpacaEval
 try:
@@ -15,6 +16,43 @@ except ImportError:
     pass  # we might need it for alpacaeval
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+
+
+def load_alpacaeval_eval_split():
+    try:
+        if "load_dataset" in globals():
+            return list(
+                load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval", split="eval")
+            )
+    except Exception as e:
+        print(f"[WARN] datasets.load_dataset alpaca_eval 失败: {e}")
+
+    try:
+        json_path = hf_hub_download(
+            repo_id="tatsu-lab/alpaca_eval",
+            repo_type="dataset",
+            filename="alpaca_eval.json",
+        )
+        with open(json_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load alpaca_eval dataset from JSON fallback: {e}"
+        ) from e
+
+    if isinstance(payload, dict):
+        if "eval" in payload and isinstance(payload["eval"], list):
+            return payload["eval"]
+        if "data" in payload and isinstance(payload["data"], list):
+            return payload["data"]
+        raise RuntimeError(
+            "Unsupported alpaca_eval.json format: expected list or dict with 'eval'/'data'"
+        )
+
+    if isinstance(payload, list):
+        return payload
+
+    raise RuntimeError("Unsupported alpaca_eval.json format: expected JSON array")
 
 
 def call_openai_api(client, model_name, prompt, max_tokens=1024, temperature=0.0):
@@ -112,11 +150,7 @@ def process_alpacaeval_generate(model, client):
         return
 
     try:
-        from datasets import load_dataset
-
-        d = load_dataset(
-            "tatsu-lab/alpaca_eval", "alpaca_eval", split="eval"
-        )
+        d = load_alpacaeval_eval_split()
     except Exception as e:
         print(f"Failed to load alpaca_eval dataset: {e}")
         return
