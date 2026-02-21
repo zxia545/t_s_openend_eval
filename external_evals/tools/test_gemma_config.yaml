@@ -1,0 +1,11 @@
+models:
+  - id: "gemma-3-1b-it"
+    api_name: "gemma-3-1b-it"
+    api_base: "http://localhost:8001/v1"
+    api_key: "dummy"
+
+benchmarks:
+  ifeval: true
+  truthfulqa: false
+  alpacaeval: false
+  livebench: false

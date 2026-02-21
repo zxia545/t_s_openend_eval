@@ -6,10 +6,7 @@ __pycache__/
 
 # C extensions
 *.so
-!external_evals/IFEval/instruction_following_eval/data/*
 __pycache__/
-
-!external_evals/IFEval/instruction_following_eval/data
 
 # Distribution / packaging
 .Python
@@ -150,9 +147,7 @@ external_evals/test_run/
 *.h5
 *.hdf5
 
-# But keep small example/config files
-!external_evals/IFEval/instruction_following_eval/data/*.jsonl
-!external_evals/TruthfulQA/truthfulqa/data/*.csv
+# But keep small example/config files (see Data Directories section below for directory un-ignoring)
 
 # Model Checkpoints (Large)
 *.bin
@@ -166,6 +161,12 @@ data/
 datasets/
 checkpoints/
 models/
+
+# Un-ignore required eval data directories (must come AFTER 'data/' rule above)
+!external_evals/IFEval/instruction_following_eval/data/
+!external_evals/IFEval/instruction_following_eval/data/**
+!external_evals/TruthfulQA/data/
+!external_evals/TruthfulQA/data/**
 
 # Secrets and API Keys
 secrets.yaml
