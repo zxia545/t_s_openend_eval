@@ -45,9 +45,10 @@ Flexible Batch Generation Script for LLM Evaluation
 
 参数:
     model_input          模型输入 (必需)
-                         - 文件夹: 遍历所有子目录作为模型
-                         - HuggingFace ID: 直接使用 (如 Qwen/Qwen2.5-0.5B-Instruct)
-                         - 本地路径: 使用单个模型
+                          - 文件夹: 遍历所有子目录作为模型
+                          - 若存在 checkpoint* 子目录: 运行所有 checkpoint*，并额外运行该目录本身(视为 final model)
+                          - HuggingFace ID: 直接使用 (如 Qwen/Qwen2.5-0.5B-Instruct)
+                          - 本地路径: 使用单个模型
 
 选项:
     -p, --port PORT      vLLM 服务端口 (默认: $DEFAULT_PORT)
@@ -454,11 +455,24 @@ add_model() {
 }
 
 if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
-    # 本地路径
     if [ -d "$MODEL_INPUT" ]; then
         mapfile -t subdirs < <(find "$MODEL_INPUT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort)
-        if [ ${#subdirs[@]} -gt 0 ]; then
-            echo "[INFO] 检测到 checkpoints 文件夹，共 ${#subdirs[@]} 个模型"
+        checkpoint_subdirs=()
+        for model_path in "${subdirs[@]}"; do
+            child_name="$(basename "$model_path")"
+            if [[ "$child_name" == checkpoint* ]]; then
+                checkpoint_subdirs+=("$model_path")
+            fi
+        done
+
+        if [ ${#checkpoint_subdirs[@]} -gt 0 ]; then
+            echo "[INFO] 检测到 checkpoint 子目录，共 ${#checkpoint_subdirs[@]} 个；同时将输入目录作为 final model 运行"
+            for model_path in "${checkpoint_subdirs[@]}"; do
+                add_model "$model_path" "$(basename "$model_path")"
+            done
+            add_model "$MODEL_INPUT" "$(basename "$MODEL_INPUT")"
+        elif [ ${#subdirs[@]} -gt 0 ]; then
+            echo "[INFO] 检测到模型目录，共 ${#subdirs[@]} 个"
             for model_path in "${subdirs[@]}"; do
                 add_model "$model_path" "$(basename "$model_path")"
             done
@@ -470,7 +484,6 @@ if [[ "$MODEL_INPUT" == *"/"* ]] && [[ ! "$MODEL_INPUT" =~ ^[a-zA-Z0-9._-]+/[a-z
         exit 1
     fi
 else
-    # HuggingFace 模型 ID 或单个名称
     add_model "$MODEL_INPUT" "$(basename "$MODEL_INPUT")"
 fi
 
