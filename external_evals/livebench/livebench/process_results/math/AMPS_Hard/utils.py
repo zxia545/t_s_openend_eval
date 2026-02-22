@@ -8,6 +8,7 @@ import signal
 import traceback
 import warnings
 from multiprocessing import Process, Queue
+from queue import Empty
 
 from livebench.process_results.util import last_boxed_only_string, remove_boxed
 
@@ -33,24 +34,49 @@ def run_with_timeout(func, args=(), timeout=8):
     def wrapper(queue):
         try:
             result = func(*args)
-            queue.put(result)
-        except Exception as e:
-            queue.put(e)
+            queue.put(("ok", result))
+        except BaseException as e:
+            try:
+                queue.put(("err", e))
+            except Exception:
+                queue.put(("err_repr", repr(e)))
 
     queue = Queue()
     process = Process(target=wrapper, args=(queue,))
     process.start()
-    process.join(timeout)
 
-    if process.is_alive():
-        process.terminate()
-        process.join()
-        raise TimeoutError("Operation timed out")
+    try:
+        process.join(timeout)
 
-    result = queue.get()
-    if isinstance(result, Exception):
-        raise result
-    return result
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=1)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=1)
+            raise TimeoutError("Operation timed out")
+
+        try:
+            status, payload = queue.get(timeout=1)
+        except Empty as e:
+            raise RuntimeError(
+                f"Operation ended without result (exitcode={process.exitcode})"
+            ) from e
+
+        if status == "ok":
+            return payload
+        if status == "err":
+            raise payload
+        raise RuntimeError(f"Operation failed in subprocess: {payload}")
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=1)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=1)
+        queue.close()
+        queue.join_thread()
 
 
 def amps_hard_process_results(ground_truth: str, llm_answer: str, debug=False) -> int:

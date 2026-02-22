@@ -21,10 +21,20 @@ except ImportError:
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_REQUEST_TIMEOUT = int(os.environ.get("EVAL_API_TIMEOUT", "180"))
 DEFAULT_API_MAX_RETRIES = int(os.environ.get("EVAL_API_MAX_RETRIES", "3"))
+DEFAULT_LIVEBENCH_CMD_TIMEOUT = int(os.environ.get("LIVEBENCH_CMD_TIMEOUT", "0"))
 
 
-def run_shell_command(cmd: str, context: str):
-    completed = subprocess.run(cmd, shell=True, executable="/bin/bash")
+def run_shell_command(cmd: str, context: str, timeout_sec: int | None = None):
+    try:
+        completed = subprocess.run(
+            cmd,
+            shell=True,
+            executable="/bin/bash",
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"{context} timed out after {timeout_sec}s") from e
+
     if completed.returncode != 0:
         raise RuntimeError(f"{context} failed with exit code {completed.returncode}")
 
@@ -231,7 +241,16 @@ def run_generate(config):
               --parallel 8 \\
               --resume --retry-failures
             """
-            run_shell_command(cmd, f"LiveBench generation for {model['id']}")
+            livebench_timeout = (
+                DEFAULT_LIVEBENCH_CMD_TIMEOUT
+                if DEFAULT_LIVEBENCH_CMD_TIMEOUT > 0
+                else None
+            )
+            run_shell_command(
+                cmd,
+                f"LiveBench generation for {model['id']}",
+                timeout_sec=livebench_timeout,
+            )
 
 
 def run_evaluate(config, skip_existing=False):
@@ -443,7 +462,16 @@ def run_evaluate(config, skip_existing=False):
                   --resume \\
                   --ignore-missing-answers
                 """
-                run_shell_command(cmd, f"LiveBench evaluation for {model['id']}")
+                livebench_timeout = (
+                    DEFAULT_LIVEBENCH_CMD_TIMEOUT
+                    if DEFAULT_LIVEBENCH_CMD_TIMEOUT > 0
+                    else None
+                )
+                run_shell_command(
+                    cmd,
+                    f"LiveBench evaluation for {model['id']}",
+                    timeout_sec=livebench_timeout,
+                )
 
 
 if __name__ == "__main__":
