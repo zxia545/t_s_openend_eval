@@ -419,6 +419,16 @@ def fit_LogisticRegressionCV(
                     **current_fit_kwargs,
                 )
                 break
+            except ValueError as exc:
+                if "groups" in str(exc) and "should not be None" in str(exc):
+                    logging.warning(
+                        "GroupKFold path requires groups metadata in this sklearn version; "
+                        "falling back to LogisticRegression without CV for compatibility."
+                    )
+                    model = LogisticRegression(C=C, **dflt_kwargs)
+                    model.fit(fit_X, fit_y, sample_weight=sample_weight)
+                    break
+                raise
             except TypeError as exc:
                 match = re.search(r"unexpected keyword argument '([^']+)'", str(exc))
                 if match is None:

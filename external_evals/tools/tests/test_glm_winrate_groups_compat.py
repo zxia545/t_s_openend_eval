@@ -136,3 +136,56 @@ def test_fit_logistic_regressioncv_works_when_fit_rejects_multiple_metadata_kwar
     )
 
     assert getattr(model, "fitted", False)
+
+
+def test_fit_logistic_regressioncv_falls_back_when_groupkfold_requires_groups(
+    monkeypatch,
+):
+    glm_winrate = _load_glm_winrate_module_with_stubs()
+
+    class _Scorer:
+        def set_score_request(self, **kwargs):
+            return self
+
+    class _FakeLogisticRegressionCV:
+        def __init__(self, cv=None, scoring=None, **kwargs):
+            self.cv = cv
+
+        def set_fit_request(self, **kwargs):
+            return self
+
+        def fit(self, X, y, sample_weight=None, **kwargs):
+            if "groups" in kwargs:
+                raise TypeError(
+                    "LogisticRegressionCV.fit() got an unexpected keyword argument 'groups'"
+                )
+            raise ValueError("The 'groups' parameter should not be None.")
+
+    class _FakeLogisticRegression:
+        def __init__(self, C=100, **kwargs):
+            self.C = C
+
+        def fit(self, X, y, sample_weight=None):
+            self.fitted = True
+            return self
+
+    monkeypatch.setattr(glm_winrate, "make_scorer", lambda *args, **kwargs: _Scorer())
+    monkeypatch.setattr(glm_winrate, "LogisticRegressionCV", _FakeLogisticRegressionCV)
+    monkeypatch.setattr(glm_winrate, "LogisticRegression", _FakeLogisticRegression)
+
+    data = pd.DataFrame(
+        {
+            "feature": [0.1, 0.2, 0.3, 0.4],
+            "preference": [0.2, 0.8, 0.3, 0.7],
+        }
+    )
+
+    model = glm_winrate.fit_LogisticRegressionCV(
+        data=data,
+        col_y_true="preference",
+        is_ytrue_proba=True,
+        n_splits=2,
+    )
+
+    assert isinstance(model, _FakeLogisticRegression)
+    assert getattr(model, "fitted", False)
