@@ -84,7 +84,9 @@ def get_length_controlled_winrate(
 
     if save_weights_dir == "auto":
         assert len(df["annotator"].unique()) == 1
-        save_weights_dir = Path(__file__).parent / "weights" / df["annotator"].unique()[0]
+        save_weights_dir = (
+            Path(__file__).parent / "weights" / df["annotator"].unique()[0]
+        )
 
     assert len(df["generator_2"].unique()) == 1
     model_name = list(df["generator_2"].unique())[0]
@@ -103,7 +105,11 @@ def get_length_controlled_winrate(
             sample_weight = sample_weight[filter_df]
 
         model = fit_LogisticRegressionCV(
-            df_XY_train, "preference", is_ytrue_proba=True, sample_weight=sample_weight, **glm_info["kwargs"]
+            df_XY_train,
+            "preference",
+            is_ytrue_proba=True,
+            sample_weight=sample_weight,
+            **glm_info["kwargs"],
         )
         predicted_preferences = model.predict_proba(df_X_test)[:, 1]
         weights = dict(zip(df_X_test.columns, model.coef_[0]))
@@ -139,7 +145,9 @@ def get_length_controlled_winrate(
             glm_name=glm_name,
         )
 
-    if is_warn_extreme_changes and get_is_extreme_changes(metrics["win_rate"], metrics["length_controlled_winrate"]):
+    if is_warn_extreme_changes and get_is_extreme_changes(
+        metrics["win_rate"], metrics["length_controlled_winrate"]
+    ):
         logging.warning(
             f"Length controlled win rate is very different from the raw one: {metrics['length_controlled_winrate']:.1f}"
             f"% vs {metrics['win_rate']:.1f}%. This might be a sign of failure of the GLM."
@@ -183,13 +191,19 @@ def predict_winrate(
     return p.mean()
 
 
-def get_is_extreme_changes(prev_winrate, new_winrate, abs_diff=10, rel_diff=4, min_warn=True, max_warn=True):
+def get_is_extreme_changes(
+    prev_winrate, new_winrate, abs_diff=10, rel_diff=4, min_warn=True, max_warn=True
+):
     """Whether the win-rate changed by more than abs_diff or rel_diff.  E.g. if  abs_diff=7, rel_diff=4 and old win
     rate is 20, this will return true if the new win rate is <10 (i.e. min(20-20/4, 20-10)) or > 40 (i.e. 20+(100-20)/2)
     Or if the old win rate is 50 and we predict <37.5 or >62.5.
     """
-    too_small = new_winrate < min(prev_winrate - (prev_winrate / rel_diff), prev_winrate - abs_diff)
-    too_large = new_winrate > max(prev_winrate + ((100 - prev_winrate) / rel_diff), prev_winrate + abs_diff)
+    too_small = new_winrate < min(
+        prev_winrate - (prev_winrate / rel_diff), prev_winrate - abs_diff
+    )
+    too_large = new_winrate > max(
+        prev_winrate + ((100 - prev_winrate) / rel_diff), prev_winrate + abs_diff
+    )
     return (too_small and min_warn) or (too_large and max_warn)
 
 
@@ -199,7 +213,9 @@ def _logistic(x):
 
 
 def _get_featurized_data(
-    df_annotations: pd.DataFrame, formula: str, regularize_to_baseline_lambda: Optional[float]
+    df_annotations: pd.DataFrame,
+    formula: str,
+    regularize_to_baseline_lambda: Optional[float],
 ) -> tuple[pd.DataFrame, pd.DataFrame, Optional[pd.Series]]:
     """Featurizes annotations using R-style formula and returns the design matrix for the train and test set.
 
@@ -234,8 +250,12 @@ def _get_featurized_data(
     std_delta_len = len_1 - len_2
     df = df[["preference", "index"]].copy()
     df["std_delta_len"] = std_delta_len / std_delta_len.std()
-    df["preference"] = df["preference"].astype(float).replace({0.0: 1.5}) - 1  # easier to work with in [0,1]
-    df["instruction_difficulty"] = df["index"].transform(lambda g: instruction_difficulty[g])
+    df["preference"] = (
+        df["preference"].astype(float).replace({0.0: 1.5}) - 1
+    )  # easier to work with in [0,1]
+    df["instruction_difficulty"] = df["index"].transform(
+        lambda g: instruction_difficulty[g]
+    )
     df["not_gamed_baseline"] = True
 
     # 3. make the design matrix for the model you would like to predict for, i.e., if there was no length difference
@@ -244,12 +264,18 @@ def _get_featurized_data(
 
     if regularize_to_baseline_lambda:
         df_gamed_and_m = pd.concat([df_gamed, df], axis=0)
-        df_XY_train, df_X_test = make_dmatrix_for_model(df_gamed_and_m, df_test, formula=formula)
+        df_XY_train, df_X_test = make_dmatrix_for_model(
+            df_gamed_and_m, df_test, formula=formula
+        )
 
         # divided by 2 because there are two gamed baselines.
-        sample_weight = (df_gamed_and_m["not_gamed_baseline"]).astype(float) + (
-            regularize_to_baseline_lambda * (~df_gamed_and_m["not_gamed_baseline"])
-        ).astype(float) / 2
+        sample_weight = (
+            (df_gamed_and_m["not_gamed_baseline"]).astype(float)
+            + (
+                regularize_to_baseline_lambda * (~df_gamed_and_m["not_gamed_baseline"])
+            ).astype(float)
+            / 2
+        )
     else:
         sample_weight = None
         df_XY_train, df_X_test = make_dmatrix_for_model(df, df_test, formula=formula)
@@ -277,7 +303,9 @@ def make_dmatrix_for_model(
         The name of the column containing the true labels.
     """
     df_XY_train = dmatrix(formula, df_train, return_type="dataframe")
-    df_X_test = build_design_matrices([df_XY_train.design_info], df_test, return_type="dataframe")[0]
+    df_X_test = build_design_matrices(
+        [df_XY_train.design_info], df_test, return_type="dataframe"
+    )[0]
     df_XY_train[col_y_true] = df_train[col_y_true]  # adds the label
     return df_XY_train, df_X_test
 
@@ -300,10 +328,25 @@ def logloss_continuous(y_true, y_pred, true_prob, true_sample_weight=None):
     return logloss(y_true, y_pred, sample_weight=true_sample_weight)
 
 
-def fit_LogisticRegressionCV(data, col_y_true, is_ytrue_proba=True, n_splits=5, C=100, sample_weight=None, **kwargs):
+def fit_LogisticRegressionCV(
+    data,
+    col_y_true,
+    is_ytrue_proba=True,
+    n_splits=5,
+    C=100,
+    sample_weight=None,
+    **kwargs,
+):
     """Fits LogisticRegressionCV with optionally y_true being probabilities rather than the labels."""
     sklearn.set_config(enable_metadata_routing=True)
-    dflt_kwargs = dict(random_state=123, dual=False, penalty="l1", solver="liblinear", n_jobs=None, fit_intercept=False)
+    dflt_kwargs = dict(
+        random_state=123,
+        dual=False,
+        penalty="l1",
+        solver="liblinear",
+        n_jobs=None,
+        fit_intercept=False,
+    )
     dflt_kwargs.update(kwargs)
     if not is_ytrue_proba:
         if n_splits > 0:
@@ -318,7 +361,11 @@ def fit_LogisticRegressionCV(data, col_y_true, is_ytrue_proba=True, n_splits=5, 
         else:
             model = LogisticRegression(C=C, **dflt_kwargs)
 
-        model.fit(data.drop(columns=[col_y_true]), (data[col_y_true]).round().astype(int), sample_weight=sample_weight)
+        model.fit(
+            data.drop(columns=[col_y_true]),
+            (data[col_y_true]).round().astype(int),
+            sample_weight=sample_weight,
+        )
 
     else:  # use log loss without assuming that labels are discrete
         # duplicate the df, once with label 0 and once with label 1
@@ -335,28 +382,51 @@ def fit_LogisticRegressionCV(data, col_y_true, is_ytrue_proba=True, n_splits=5, 
             true_sample_weight = None
             sample_weight = true_prob
         else:
-            true_sample_weight = np.concatenate([sample_weight, sample_weight], axis=0)  # actual sample weight
+            true_sample_weight = np.concatenate(
+                [sample_weight, sample_weight], axis=0
+            )  # actual sample weight
             # multiply the true probabilities by the actual sample_weight you want
             sample_weight = true_prob * true_sample_weight
 
         if n_splits > 0:
             cv = GroupKFold(n_splits=n_splits)
             scorer = make_scorer(
-                logloss_continuous, response_method="predict_proba", greater_is_better=False
+                logloss_continuous,
+                response_method="predict_proba",
+                greater_is_better=False,
             ).set_score_request(true_sample_weight=True, true_prob=True)
             model = LogisticRegressionCV(cv=cv, scoring=scorer, **dflt_kwargs)
-            fit_kwargs = dict(groups=data_dup["group"], true_sample_weight=true_sample_weight, true_prob=true_prob)
+            fit_kwargs = dict(
+                groups=data_dup["group"],
+                true_sample_weight=true_sample_weight,
+                true_prob=true_prob,
+            )
         else:
             model = LogisticRegression(C=C, **dflt_kwargs)
             fit_kwargs = dict()
 
         model.set_fit_request(sample_weight=True)
-        model.fit(
-            X=data_dup.drop(columns=[col_y_true, "y", "group"]),
-            y=data_dup["y"],
-            sample_weight=sample_weight,
-            **fit_kwargs,
-        )
+        fit_X = data_dup.drop(columns=[col_y_true, "y", "group"])
+        fit_y = data_dup["y"]
+        try:
+            model.fit(
+                X=fit_X,
+                y=fit_y,
+                sample_weight=sample_weight,
+                **fit_kwargs,
+            )
+        except TypeError as exc:
+            if "groups" not in str(exc) or "groups" not in fit_kwargs:
+                raise
+            fit_kwargs_no_groups = {
+                k: v for k, v in fit_kwargs.items() if k != "groups"
+            }
+            model.fit(
+                X=fit_X,
+                y=fit_y,
+                sample_weight=sample_weight,
+                **fit_kwargs_no_groups,
+            )
     return model
 
 
