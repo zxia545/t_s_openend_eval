@@ -5,6 +5,7 @@ import json
 import csv
 import time
 import urllib.request
+import subprocess
 import concurrent.futures
 from openai import OpenAI
 from pathlib import Path
@@ -20,6 +21,12 @@ except ImportError:
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_REQUEST_TIMEOUT = int(os.environ.get("EVAL_API_TIMEOUT", "180"))
 DEFAULT_API_MAX_RETRIES = int(os.environ.get("EVAL_API_MAX_RETRIES", "3"))
+
+
+def run_shell_command(cmd: str, context: str):
+    completed = subprocess.run(cmd, shell=True, executable="/bin/bash")
+    if completed.returncode != 0:
+        raise RuntimeError(f"{context} failed with exit code {completed.returncode}")
 
 
 def load_alpacaeval_eval_split():
@@ -224,7 +231,7 @@ def run_generate(config):
               --parallel 8 \\
               --resume --retry-failures
             """
-            os.system(cmd)
+            run_shell_command(cmd, f"LiveBench generation for {model['id']}")
 
 
 def run_evaluate(config, skip_existing=False):
@@ -258,7 +265,7 @@ def run_evaluate(config, skip_existing=False):
                   --input_response_data={in_file} \\
                   --output_dir={out_dir}
                 """
-                os.system(cmd)
+                run_shell_command(cmd, f"IFEval evaluation for {model['id']}")
 
         if benchmarks.get("truthfulqa"):
             print(f"[{model['id']}] Evaluating TruthfulQA...")
@@ -281,7 +288,7 @@ def run_evaluate(config, skip_existing=False):
                   --input_path {in_file} \\
                   --output_path {out_path}
                 """
-                os.system(cmd)
+                run_shell_command(cmd, f"TruthfulQA evaluation for {model['id']}")
 
         if benchmarks.get("alpacaeval"):
             print(f"[{model['id']}] Evaluating AlpacaEval2...")
@@ -410,7 +417,7 @@ def run_evaluate(config, skip_existing=False):
                       --annotators_config {judge_config_dir} \\
                       --name "{model["id"]}"
                     """
-                    os.system(cmd)
+                    run_shell_command(cmd, f"AlpacaEval2 evaluation for {model['id']}")
         if benchmarks.get("livebench"):
             print(f"[{model['id']}] Evaluating LiveBench...")
             output_dir = ROOT_DIR / "results" / model["id"] / "livebench"
@@ -436,7 +443,7 @@ def run_evaluate(config, skip_existing=False):
                   --resume \\
                   --ignore-missing-answers
                 """
-                os.system(cmd)
+                run_shell_command(cmd, f"LiveBench evaluation for {model['id']}")
 
 
 if __name__ == "__main__":

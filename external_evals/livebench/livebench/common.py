@@ -88,6 +88,7 @@ LIVE_BENCH_RELEASES = {
 }
 
 LIVE_BENCH_ROOT_PATH = Path(__file__).parent
+_LIST_FEATURE_COMPAT_PATCHED = False
 
 
 @dataclasses.dataclass
@@ -162,8 +163,37 @@ def _ensure_datasets_list_feature_compat():
     """Backfill missing `List` feature type for older datasets versions."""
     from datasets.features import features as ds_features
 
-    if "List" not in ds_features._FEATURE_TYPES:
-        ds_features._FEATURE_TYPES["List"] = ds_features.Sequence
+    if "List" in ds_features._FEATURE_TYPES:
+        return
+
+    global _LIST_FEATURE_COMPAT_PATCHED
+
+    if _LIST_FEATURE_COMPAT_PATCHED:
+        return
+
+    original_generate_from_dict = ds_features.generate_from_dict
+
+    def _generate_from_dict_with_list_compat(obj):
+        if isinstance(obj, list):
+            return [_generate_from_dict_with_list_compat(value) for value in obj]
+
+        if isinstance(obj, dict):
+            obj_type = obj.get("_type")
+
+            if obj_type == "List":
+                feature = obj.get("feature")
+                return [_generate_from_dict_with_list_compat(feature)]
+
+            if "_type" not in obj or isinstance(obj_type, dict):
+                return {
+                    key: _generate_from_dict_with_list_compat(value)
+                    for key, value in obj.items()
+                }
+
+        return original_generate_from_dict(obj)
+
+    ds_features.generate_from_dict = _generate_from_dict_with_list_compat
+    _LIST_FEATURE_COMPAT_PATCHED = True
 
 
 def get_tasks_from_hf_category(category: "Dataset"):
