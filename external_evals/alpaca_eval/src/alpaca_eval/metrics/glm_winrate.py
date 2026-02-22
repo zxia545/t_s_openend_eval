@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
@@ -408,25 +409,24 @@ def fit_LogisticRegressionCV(
         model.set_fit_request(sample_weight=True)
         fit_X = data_dup.drop(columns=[col_y_true, "y", "group"])
         fit_y = data_dup["y"]
-        try:
-            model.fit(
-                X=fit_X,
-                y=fit_y,
-                sample_weight=sample_weight,
-                **fit_kwargs,
-            )
-        except TypeError as exc:
-            if "groups" not in str(exc) or "groups" not in fit_kwargs:
-                raise
-            fit_kwargs_no_groups = {
-                k: v for k, v in fit_kwargs.items() if k != "groups"
-            }
-            model.fit(
-                X=fit_X,
-                y=fit_y,
-                sample_weight=sample_weight,
-                **fit_kwargs_no_groups,
-            )
+        current_fit_kwargs = dict(fit_kwargs)
+        while True:
+            try:
+                model.fit(
+                    X=fit_X,
+                    y=fit_y,
+                    sample_weight=sample_weight,
+                    **current_fit_kwargs,
+                )
+                break
+            except TypeError as exc:
+                match = re.search(r"unexpected keyword argument '([^']+)'", str(exc))
+                if match is None:
+                    raise
+                unsupported_key = match.group(1)
+                if unsupported_key not in current_fit_kwargs:
+                    raise
+                current_fit_kwargs.pop(unsupported_key)
     return model
 
 

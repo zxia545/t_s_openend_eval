@@ -235,6 +235,57 @@ should_use_local_vllm_judge() {
     [ "$JUDGE_API_BASE" = "vllm" ]
 }
 
+try_reuse_existing_local_judge() {
+    local api_base="http://localhost:${JUDGE_PORT}/v1"
+    local models_url="${api_base}/models"
+    local response
+    response=$(curl -s --max-time 3 "$models_url" 2>/dev/null || true)
+
+    if [ -z "$response" ]; then
+        return 1
+    fi
+
+    local detected_model
+    detected_model=$(
+        RESPONSE="$response" REQUESTED_MODEL="$JUDGE_MODEL" python - <<'PY'
+import json
+import os
+
+response = os.environ.get("RESPONSE", "")
+requested = os.environ.get("REQUESTED_MODEL", "")
+requested_base = requested.rstrip("/").split("/")[-1] if requested else ""
+
+try:
+    payload = json.loads(response)
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+data = payload.get("data", [])
+model_ids = [item.get("id") for item in data if isinstance(item, dict) and item.get("id")]
+
+if not model_ids:
+    print("")
+elif requested and requested in model_ids:
+    print(requested)
+elif requested_base and requested_base in model_ids:
+    print(requested_base)
+else:
+    print(model_ids[0])
+PY
+    )
+
+    if [ -z "$detected_model" ]; then
+        return 1
+    fi
+
+    JUDGE_API_BASE="$api_base"
+    JUDGE_MODEL="$detected_model"
+    LOCAL_JUDGE_MODE=false
+    echo "[INFO] 发现已启动的本地 vLLM Judge，直接复用: api_base=$JUDGE_API_BASE | model=$JUDGE_MODEL"
+    return 0
+}
+
 benchmarks_need_llm_judge() {
     # Check if any benchmark in the list needs an LLM judge
     IFS=',' read -ra BENCH_ARRAY <<< "$BENCHMARKS"
@@ -637,9 +688,13 @@ if [ "$HAS_ALPACAEVAL" = true ]; then
         echo "[INFO] 所有模型的 AlpacaEval2 结果已存在，跳过 judge 启动"
     else
         if should_use_local_vllm_judge; then
-            start_local_judge_vllm
-            trap 'stop_local_judge_vllm' EXIT
-            echo "[INFO] 使用本地 vLLM Judge: api_base=$JUDGE_API_BASE | model=$JUDGE_MODEL"
+            if try_reuse_existing_local_judge; then
+                echo "[INFO] 复用已启动 Judge，跳过新服务启动"
+            else
+                start_local_judge_vllm
+                trap 'stop_local_judge_vllm' EXIT
+                echo "[INFO] 使用本地 vLLM Judge: api_base=$JUDGE_API_BASE | model=$JUDGE_MODEL"
+            fi
         fi
         for model_id in $MODEL_IDS; do
             run_model_alpacaeval "$model_id"
