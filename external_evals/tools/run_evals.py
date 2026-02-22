@@ -39,6 +39,28 @@ def run_shell_command(cmd: str, context: str, timeout_sec: int | None = None):
         raise RuntimeError(f"{context} failed with exit code {completed.returncode}")
 
 
+def run_process_command(
+    args: list[str],
+    context: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    timeout_sec: int | None = None,
+):
+    try:
+        completed = subprocess.run(
+            args=args,
+            cwd=cwd,
+            env=env,
+            shell=False,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"{context} timed out after {timeout_sec}s") from e
+
+    if completed.returncode != 0:
+        raise RuntimeError(f"{context} failed with exit code {completed.returncode}")
+
+
 def load_alpacaeval_eval_split():
     try:
         if load_dataset is not None:
@@ -429,14 +451,33 @@ def run_evaluate(config, skip_existing=False):
                             f,
                         )
 
-                    cmd = f"""
-                    cd {ROOT_DIR}/alpaca_eval && \\
-                    PYTHONPATH={ROOT_DIR}/alpaca_eval/src:$PYTHONPATH python -m alpaca_eval.main evaluate \\
-                      --model_outputs {in_file} \\
-                      --annotators_config {judge_config_dir} \\
-                      --name "{model["id"]}"
-                    """
-                    run_shell_command(cmd, f"AlpacaEval2 evaluation for {model['id']}")
+                    env = os.environ.copy()
+                    vendored_src = str(ROOT_DIR / "alpaca_eval" / "src")
+                    current_pythonpath = env.get("PYTHONPATH", "")
+                    env["PYTHONPATH"] = (
+                        f"{vendored_src}:{current_pythonpath}"
+                        if current_pythonpath
+                        else vendored_src
+                    )
+
+                    cmd_args = [
+                        "python",
+                        "-m",
+                        "alpaca_eval.main",
+                        "evaluate",
+                        "--model_outputs",
+                        str(in_file),
+                        "--annotators_config",
+                        str(judge_config_dir),
+                        "--name",
+                        str(model["id"]),
+                    ]
+                    run_process_command(
+                        cmd_args,
+                        f"AlpacaEval2 evaluation for {model['id']}",
+                        cwd=ROOT_DIR / "alpaca_eval",
+                        env=env,
+                    )
         if benchmarks.get("livebench"):
             print(f"[{model['id']}] Evaluating LiveBench...")
             output_dir = ROOT_DIR / "results" / model["id"] / "livebench"
